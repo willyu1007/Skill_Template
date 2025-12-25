@@ -1,6 +1,8 @@
-# Generated provider artifacts
-.claude/
-.codex/
+# Generated provider artifacts (except skills/ which should be committed)
+.claude/*
+!.claude/skills/
+.codex/*
+!.codex/skills/
 .cursor/
 .copilot/
 .gemini/

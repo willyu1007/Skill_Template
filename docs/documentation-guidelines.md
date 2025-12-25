@@ -9,7 +9,7 @@ These guidelines target repository documentation that is **maintained for both L
 Applies to (non-exhaustive):
 - Entry & rules: `README.md`, `AGENTS.md`, `CLAUDE.md`
 - Standards & design: specs, ADRs, design notes under `docs/`
-- SSOT content: `.ai/skills/`, `.ai/commands/`
+- SSOT content: `.ai/skills/`
 - Bootstrap materials: docs and artifacts under `construction/` (or `init/`)
 
 ## 2. Core principles (write for LLMs)
@@ -43,7 +43,7 @@ Applies to (non-exhaustive):
 6. Change log (optional)
 
 ### 3.2 Task/implementation docs (when you want the LLM to do work)
-1. Background (≤ 5 lines)
+1. Background (<= 5 lines)
 2. Goals (verifiable)
 3. Scope (IN/OUT)
 4. Constraints (MUST / DON'T)
@@ -52,15 +52,15 @@ Applies to (non-exhaustive):
 7. Risks & rollback (if generating/overwriting)
 
 ### 3.3 Skill / Command docs (SSOT)
-For `.ai/skills/` and `.ai/commands/` content, use:
-- **Purpose (1–2 sentences)**: what problem it solves
+For `.ai/skills/` content, use:
+- **Purpose (1-2 sentences)**: what problem it solves
 - **Trigger / usage**: when to use; required inputs; expected outputs
 - **Steps**: bullet list; minimal examples only
 - **Notes**: boundaries, forbidden actions, failure handling
 - **References**: optional (file paths / external links)
 
 ## 4. Readability and maintainability rules (MUST)
-- Keep heading depth ≤ 4 levels (`#` to `####`).
+- Keep heading depth <= 4 levels (`#` to `####`).
 - Wrap all paths/commands/identifiers in backticks (e.g., `.ai/skills/`, `.ai/scripts/sync-skills.js`).
 - Any action that generates/overwrites files MUST specify:
   - blast radius (which directories/files are written)

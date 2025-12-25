@@ -1,84 +1,131 @@
-# Initialization Instructions
+# Initialization Instructions (LLM)
 
-You are initializing a new project using the AI-Friendly Repository Template.
+You are initializing a new project using this repository template.
 
-## Your Task
+## Conclusions (read first)
 
-Guide user through project initialization by collecting information and generating configuration files.
+- You MUST follow a **3-stage, file-based** pipeline:
+  - **Stage A**: write requirement docs under `docs/project/` (DoD-driven).
+  - **Stage B**: write a machine-readable blueprint at `docs/project/project-blueprint.json`.
+  - **Stage C**: scaffold minimal structure + select skill packs by updating `.ai/skills/_meta/sync-manifest.json`, then run `node .ai/scripts/sync-skills.js`.
+- You MUST keep changes **verifiable**:
+  - Each stage ends with a checklist and a command that verifies outputs.
+- You MUST NOT edit generated wrapper stubs directly:
+  - Do not edit `.codex/skills/` or `.claude/skills/` by hand.
+  - Only edit SSOT in `.ai/skills/`, then run `node .ai/scripts/sync-skills.js`.
 
-## Initialization Steps
+## Inputs you MUST collect from the user
 
-### Step 1: Collect Project Information
+Use `init/skills/initialize-project-from-requirements/templates/conversation-prompts.md` as your question bank.
 
-**See `init/INITIALIZATION.md` for complete field reference.**
+Minimum required inputs:
 
-Quick checklist:
+- one-line project purpose
+- primary user roles
+- in-scope MUST requirements and out-of-scope (OUT)
+- top user journeys with acceptance criteria
+- constraints (compliance/security/platform/deadlines/integrations)
+- repo layout intent (`single` vs `monorepo`)
+- quality expectations (testing/CI/devops)
 
-| Category | Fields |
-|----------|--------|
-| Basic | name, description, version |
-| Requirements | goals, domain, dataFlow, constraints |
-| Frontend | framework, language, buildTool |
-| Backend | framework, language, database |
-| Structure | repoStructure, testStrategy |
+If the user cannot decide, you MUST record TBD items in `docs/project/risk-open-questions.md` (owner + options + decision due).
 
-### Step 2: Generate Files
+## Stage A - Requirements (write files)
 
-Create both files in `init/`:
+### Outputs
 
-**init/project-profile.yaml:**
-```yaml
-name: project-name
-description: Project description
-version: 0.1.0
+Create/update these files under `docs/project/`:
 
-requirements:
-  goals: [collected goals]
-  domain: [business domain]
-  dataFlow: [data flow description]
-  constraints: [constraints list]
+- `requirements.md`
+- `non-functional-requirements.md`
+- `domain-glossary.md`
+- `risk-open-questions.md`
 
-development:
-  frontend:
-    framework: [React|Vue|Angular|Svelte|None]
-    language: [TypeScript|JavaScript]
-    buildTool: [Vite|Webpack|Next.js|Nuxt]
-  backend:
-    framework: [Express|Fastify|NestJS|Django|FastAPI|None]
-    language: [TypeScript|Python|Go|Java]
-    database: [PostgreSQL|MySQL|MongoDB|SQLite]
-  repoStructure: [monolith|monorepo|multi-repo]
-  testStrategy: [unit|integration|e2e|none]
+Start from templates under:
+- `init/skills/initialize-project-from-requirements/templates/`
 
-generated: [ISO timestamp]
-```
+### Verification (required)
 
-**init/project-profile.json:** Same content in JSON format.
+Run:
 
-### Step 3: Sync Skill Stubs
-
-Execute:
 ```bash
-node .ai/scripts/sync-skills.js
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js check-docs --docs-root docs/project
 ```
 
-### Step 4: Guide Customization
+If this repo uses a strict gate, run:
 
-After sync runs, guide user to:
-1. Review generated `.codex/skills/` and `.claude/skills/` stubs
-2. Customize `.ai/skills/` for their project
-3. Remove unneeded example skills
-4. Add project-specific workflow skills
-5. Add or refine `.ai/commands/` as needed
+```bash
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js check-docs --docs-root docs/project --strict
+```
 
-## Rules
+Iterate with the user until Stage A passes.
 
-- All fields are optional; use sensible defaults
-- Keep conversation focused on essential information
-- Generate both YAML and JSON profiles
-- Always run `node .ai/scripts/sync-skills.js` after generating profile
+## Stage B - Blueprint (write file)
 
-## After Initialization
+### Output
 
-Direct user to root `AGENTS.md` for ongoing project instructions.
+- `docs/project/project-blueprint.json`
+
+Start from:
+- `init/skills/initialize-project-from-requirements/templates/project-blueprint.example.json`
+
+### Verification (required)
+
+```bash
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js validate   --blueprint docs/project/project-blueprint.json
+```
+
+### Pack suggestions (recommended)
+
+Run:
+
+```bash
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js suggest-packs   --blueprint docs/project/project-blueprint.json   --repo-root .
+```
+
+- If recommended packs are missing, you SHOULD discuss with the user before changing `skills.packs`.
+- Only use `--write` if the user approves adding recommended packs.
+
+## Stage C - Scaffold + Skills (run commands)
+
+### Dry-run scaffold first (required)
+
+```bash
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js scaffold   --blueprint docs/project/project-blueprint.json   --repo-root .
+```
+
+### Apply (writes changes + sync wrappers)
+
+```bash
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js apply   --blueprint docs/project/project-blueprint.json   --repo-root .   --providers codex,claude   --require-stage-a
+```
+
+This will:
+- create missing scaffold directories (no overwrites),
+- update `.ai/skills/_meta/sync-manifest.json` (collection: `current`),
+- run `node .ai/scripts/sync-skills.js` to regenerate wrappers.
+
+### Optional: remove init kit after success
+
+Only if the user asks to remove bootstrap artifacts:
+
+```bash
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js cleanup-init   --repo-root .   --apply   --i-understand
+```
+
+## Prompt template (use internally)
+
+Goal:
+- Initialize the project with verifiable 3-stage outputs.
+
+Constraints (MUST / DON'T):
+- MUST output Stage A docs under `docs/project/`.
+- MUST output blueprint at `docs/project/project-blueprint.json`.
+- MUST update skills via `.ai/skills/_meta/sync-manifest.json` and run `node .ai/scripts/sync-skills.js`.
+- DON'T edit `.codex/skills/` or `.claude/skills/` directly.
+
+Acceptance criteria:
+- Stage A passes `check-docs` (strict if required).
+- Stage B blueprint validates.
+- Stage C wrappers regenerated and match selected packs.
 

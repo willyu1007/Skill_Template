@@ -16,9 +16,7 @@ Template repository. Users clone this to start new AI-friendly projects.
 |-----------|---------|
 | `init/` | **Start here** - Initialization instructions and output |
 | `.ai/skills/` | Single Source of Truth for skills (including workflows) |
-| `.ai/commands/` | Single Source of Truth for commands |
 | `.ai/scripts/` | Sync scripts (Node.js) |
-| `.ai/templates/` | Templates and examples |
 | `.codex/` | Codex skill entry stubs |
 | `.claude/` | Claude skill entry stubs |
 | `dev/` | Working documentation for complex tasks |
@@ -37,29 +35,31 @@ Template repository. Users clone this to start new AI-friendly projects.
 2. Include YAML frontmatter with `name` and `description`
 3. Run `node .ai/scripts/sync-skills.js`
 
-### Add New Command
-
-1. Create `.ai/commands/[command-name]/COMMAND.md`
-2. Include YAML frontmatter with `name`, `description`, and `arguments` if needed
-
 ## Available Workflows
 
 | Workflow | Description |
 |----------|-------------|
-| `auth-route-debugging` | Diagnose 401/403 errors and JWT issues |
-| `auth-route-testing` | End-to-end API route verification |
-| `frontend-error-resolution` | Debug React components and styling |
-| `typescript-error-resolution` | Fix `tsc` compilation errors |
-| `code-architecture-review` | Review code for pattern consistency |
-| `code-refactoring` | Safely reorganize code |
-| `documentation-maintenance` | Keep documentation accurate |
-| `technical-research` | Deep-dive into complex problems |
+| `debug-authenticated-routes` | Diagnose 401/403 errors and JWT issues |
+| `test-authenticated-routes` | End-to-end API route verification |
+| `map-route-changes-for-testing` | Map route changes for testing |
+| `fix-frontend-runtime-errors` | Debug React components and styling |
+| `resolve-typescript-build-errors` | Fix `tsc` compilation errors |
+| `review-code-architecture` | Review code for pattern consistency |
+| `execute-code-refactor` | Safely reorganize code |
+| `plan-code-refactors` | Plan refactoring tasks |
+| `review-implementation-plans` | Review implementation plans |
+| `author-developer-documentation` | Keep documentation accurate |
+| `create-dev-docs-plan` | Create development docs plan |
+| `update-dev-docs-for-handoff` | Update docs for session handoff |
+| `perform-web-research` | Deep-dive into complex problems |
+| `generate-skills-from-knowledge` | Generate skills from knowledge |
+| `land-skills-into-repo` | Install skills bundle into repo |
 
-Workflow skills live under `.ai/skills/`
+Workflow skills live under `.ai/skills/workflows/`
 
 ## Rules
 
-- Always edit `.ai/skills/` and `.ai/commands/` (SSOT), never edit `.codex/` or `.claude/` directly
+- Always edit `.ai/skills/` (SSOT), never edit `.codex/` or `.claude/` directly
 - Keep SKILL.md files under 500 lines
 - Use supporting files (`reference.md`, `examples.md`, `scripts/`, `templates/`) for detailed reference content
 - Do not create a `resources/` subdirectory inside skills

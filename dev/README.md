@@ -1,118 +1,43 @@
 # Dev Docs Pattern
 
-Persistent documentation for maintaining project context across AI sessions.
+Persistent task documentation to preserve context across AI sessions and handoffs.
 
-## Quick Reference
+## When to use
+Use: complex tasks (multi-module, multi-session, >2 hours).
+Skip: small fixes, single-file changes, trivial updates.
 
-| Component | File | Purpose |
-|-----------|------|---------|
-| Plan | `[task]-plan.md` | Implementation strategy and phases |
-| Context | `[task]-context.md` | Current state and key decisions |
-| Tasks | `[task]-tasks.md` | Progress checklist |
+## Layout (standard)
+Each task lives under `dev/active/<task-name>/` and uses a fixed set of files:
 
-## Structure
+| File | Purpose |
+|------|---------|
+| `00-overview.md` | Goal, non-goals, current status |
+| `01-plan.md` | Phases, steps, acceptance criteria |
+| `02-architecture.md` | Boundaries, interfaces/contracts, key risks |
+| `03-implementation-notes.md` | What changed and why |
+| `04-verification.md` | Checks run and results |
+
+Directory example:
 
 ```
 dev/
-├── active/[task-name]/    # Current work
-│   ├── [task]-plan.md
-│   ├── [task]-context.md
-│   └── [task]-tasks.md
-└── archive/               # Completed tasks
+  active/
+    <task-name>/
+      00-overview.md
+      01-plan.md
+      02-architecture.md
+      03-implementation-notes.md
+      04-verification.md
+  archive/
 ```
 
-## When to Use
+## For AI assistants
+On context reset:
+1. Read `dev/active/<task-name>/00-overview.md`.
+2. Read `01-plan.md`.
+3. Consult `02-architecture.md`, `03-implementation-notes.md`, and `04-verification.md` as needed.
 
-**Use:** Complex tasks (>2 hours), multi-session work, large refactoring
-**Skip:** Simple fixes, single-file changes, trivial updates
-
-## For AI Assistants
-
-### On Context Reset
-
-1. Read `[task]-context.md` first (current state)
-2. Check `[task]-tasks.md` (progress)
-3. Reference `[task]-plan.md` (strategy)
-
-### During Work
-
-- Update `SESSION PROGRESS` in context.md after each milestone
-- Check off completed tasks immediately
-- Add discovered tasks to tasks.md
-
----
-
-## File Templates
-
-### plan.md Template
-
-```markdown
-# [Task Name] - Plan
-
-## Summary
-[One paragraph: what and why]
-
-## Phases
-
-### Phase 1: [Name] (estimate)
-- Task 1.1: [Action] → Acceptance: [criteria]
-- Task 1.2: [Action] → Acceptance: [criteria]
-
-### Phase 2: [Name] (estimate)
-...
-
-## Risks
-- [Risk]: [Mitigation]
-```
-
-### context.md Template
-
-```markdown
-# [Task Name] - Context
-
-## SESSION PROGRESS (YYYY-MM-DD)
-
-### ✅ COMPLETED
-- [What was done]
-
-### 🟡 IN PROGRESS
-- [Current work]
-- File: [path]
-
-### ⚠️ BLOCKERS
-- [Issues]
-
-## Key Files
-- `path/file.ts`: [Purpose]
-
-## Quick Resume
-1. [First step to continue]
-2. [Next step]
-```
-
-### tasks.md Template
-
-```markdown
-# [Task Name] - Tasks
-
-## Phase 1: [Name] ✅
-- [x] Task completed
-- [x] Another completed
-
-## Phase 2: [Name] 🟡
-- [x] Done
-- [ ] In progress (CURRENT)
-- [ ] Pending
-
-## Phase 3: [Name] ⏳
-- [ ] Not started
-```
-
----
-
-## Reference
-
-| Resource | Path |
-|----------|------|
-| Detailed Specs | [.ai/templates/dev-docs/REFERENCE.md](../.ai/templates/dev-docs/REFERENCE.md) |
-| Examples | [.ai/templates/dev-docs/examples/](../.ai/templates/dev-docs/examples/) |
+During work:
+- Keep `00-overview.md` status current.
+- Append to `03-implementation-notes.md` after each milestone.
+- Record every check run in `04-verification.md`.

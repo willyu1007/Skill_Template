@@ -1,69 +1,73 @@
-﻿# AI-Friendly Repository Template
+# Project Initialization (3-stage, verifiable)
 
-A starter kit for creating LLM-optimized codebases with Single Source of Truth (SSOT) architecture.
+## Conclusions (read first)
 
-## What This Template Provides
+- This repo template initializes projects using a **3-stage, file-based pipeline**:
+  1) **Stage A - Requirements**: produce high-quality requirement docs under `docs/project/`
+  2) **Stage B - Blueprint**: derive a machine-readable blueprint at `docs/project/project-blueprint.json`
+  3) **Stage C - Scaffold + Skills**: create a minimal scaffold, update skill pack selection in `.ai/skills/_meta/sync-manifest.json`, then sync provider wrappers via `node .ai/scripts/sync-skills.js`
+- Stage A is **verifiable** via a project-local script (`check-docs`).
+- Skill SSOT remains `.ai/skills/`. Provider-native wrappers (`.codex/skills/`, `.claude/skills/`) are **generated** and MUST NOT be edited directly.
 
-| Component | Location | Description |
-|-----------|----------|-------------|
-| Skills | `.ai/skills/` | Coding patterns, guidelines, and workflow skills |
-| Commands | `.ai/commands/` | Reusable task templates |
-| Scripts | `.ai/scripts/` | Stub sync scripts |
+## Quick start
 
-## Quick Start
+### Option 1: AI-assisted (recommended)
 
-### Option 1: AI-Assisted (Recommended)
-
-1. Open project with your AI assistant
-2. AI reads `init/AGENTS.md` and guides initialization
-3. Follow prompts to provide project information
-4. AI generates profile and syncs skill stubs
-
-### Option 2: Manual
+1. Ask your LLM to follow `init/AGENTS.md`.
+2. Review and commit:
+   - Stage A docs under `docs/project/`
+   - Stage B blueprint at `docs/project/project-blueprint.json`
+3. Run Stage C automation (dry-run scaffold first, then apply):
 
 ```bash
-# 1. Sync skill stubs
-node .ai/scripts/sync-skills.js
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js scaffold   --blueprint docs/project/project-blueprint.json   --repo-root .
 
-# 2. Create project profile manually
-# See init/INITIALIZATION.md
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js apply   --blueprint docs/project/project-blueprint.json   --repo-root .   --providers codex,claude   --require-stage-a
 ```
 
-## Directory Structure
+### Option 2: Manual (human-driven)
 
-```
-.ai/
-|-- skills/               # SSOT for skills (incl. workflows)
-|-- commands/             # SSOT for commands
-|-- scripts/              # Node.js sync scripts
-`-- templates/            # Templates and examples
+1. Create Stage A docs using templates:
+   - `init/skills/initialize-project-from-requirements/templates/requirements.template.md`
+   - `init/skills/initialize-project-from-requirements/templates/non-functional-requirements.template.md`
+   - `init/skills/initialize-project-from-requirements/templates/domain-glossary.template.md`
+   - `init/skills/initialize-project-from-requirements/templates/risk-open-questions.template.md`
 
-init/                     # Initialization (you are here)
-|-- README.md             # This file
-|-- AGENTS.md             # AI assistant instructions
-|-- INITIALIZATION.md     # Detailed initialization workflow
-`-- project-profile.*     # Generated after initialization
+2. Validate Stage A:
 
-dev/                      # Development documentation
-|-- README.md             # Dev Docs Pattern guide
-|-- active/               # Current tasks
-`-- archive/              # Completed tasks
-
-.codex/skills/            # Codex skill entry stubs
-.claude/skills/           # Claude skill entry stubs
+```bash
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js check-docs --docs-root docs/project
 ```
 
-## After Initialization
+3. Create `docs/project/project-blueprint.json` from:
+   - `init/skills/initialize-project-from-requirements/templates/project-blueprint.example.json`
 
-1. **Customize Skills**: Edit `.ai/skills/` for your project
-2. **Add Workflow Skills**: Create workflow skills under `.ai/skills/`
-3. **Add Commands**: Create or update `.ai/commands/`
-4. **Re-sync Stubs**: `node .ai/scripts/sync-skills.js`
+4. Validate Stage B:
 
-## Documentation
+```bash
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js validate   --blueprint docs/project/project-blueprint.json
+```
 
-- [Dev Docs Pattern](../dev/README.md) - Context persistence across sessions
-- [Documentation Guidelines](../docs/documentation-guidelines.md)
-- [Naming Conventions](../docs/naming-conventions.md)
+5. Apply Stage C:
 
+```bash
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js apply   --blueprint docs/project/project-blueprint.json   --repo-root .   --providers both
+```
+
+## Optional cleanup (remove init kit)
+
+After initialization succeeds, you may remove the bootstrap kit:
+
+```bash
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js cleanup-init   --repo-root .   --apply   --i-understand
+```
+
+This is guarded by the marker file: `init/.init-kit`.
+
+## Where to read next
+
+- AI-driven workflow: `init/AGENTS.md`
+- Deep details and rubrics: `init/reference.md`
+- Stage checklists: `init/stages/`
+- Skill implementation: `init/skills/initialize-project-from-requirements/`
 

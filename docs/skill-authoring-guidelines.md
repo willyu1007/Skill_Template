@@ -25,28 +25,30 @@ Does not apply to generated stubs in:
 
 - You MUST edit skills only in `.ai/skills/`.
 - You MUST NOT edit `.codex/skills/` or `.claude/skills/` directly.
-- After adding or updating a skill, you MUST run: `node .ai/scripts/sync-skills.js`
+- After adding or updating a skill, you MUST sync stubs:
+  - Full sync (default): `node .ai/scripts/sync-skills.js`
+  - Incremental (one skill): `node .ai/scripts/sync-skills.js --scope specific --skills <skill-name> --mode update`
 
 ## Naming and layout
 
 ### Naming (MUST)
 
-- Skill directory name MUST be kebab-case: `.ai/skills/<skill-name>/`
-- The skill `name` in `SKILL.md` MUST match the directory name.
+- Skill leaf directory name MUST be kebab-case: `.ai/skills/.../<skill-name>/`
+- The skill `name` in `SKILL.md` MUST match the **leaf** directory name.
 - Use a capability-oriented name (verb + domain/tool) and avoid ambiguous names.
 
 ### Layout (MUST)
 
 Required:
 
-- `.ai/skills/<skill-name>/SKILL.md`
+- `.ai/skills/.../<skill-name>/SKILL.md` (taxonomy directories are allowed)
 
 Optional supporting files (recommended for progressive disclosure):
 
-- `.ai/skills/<skill-name>/reference.md`
-- `.ai/skills/<skill-name>/examples.md`
-- `.ai/skills/<skill-name>/scripts/`
-- `.ai/skills/<skill-name>/templates/`
+- `<skill-dir>/reference.md`
+- `<skill-dir>/examples.md`
+- `<skill-dir>/scripts/`
+- `<skill-dir>/templates/`
 
 Forbidden:
 
@@ -123,3 +125,9 @@ Before finishing a skill change:
 - `SKILL.md` is <= 500 lines and uses progressive disclosure.
 - `node .ai/scripts/sync-skills.js` has been run and stubs are up to date.
 
+## Syncing notes (this repository)
+
+- Stub generation discovers skills by recursively finding `SKILL.md` under `.ai/skills/`.
+- Provider stubs are flattened by skill `name` under `.codex/skills/<skill-name>/` and `.claude/skills/<skill-name>/`.
+- The "current collection" is configured via `.ai/skills/_meta/sync-manifest.json` and synced with:
+  - `node .ai/scripts/sync-skills.js --scope current --providers both`
