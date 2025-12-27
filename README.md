@@ -40,8 +40,8 @@ dev/                       # Development documentation
 
 - [Initialization Guide](init/README.md)
 - [Dev Docs Pattern](dev/README.md)
-- [Documentation Guidelines](docs/documentation-guidelines.md)
-- [Naming Conventions](docs/naming-conventions.md)
+- [Documentation Guidelines](.ai/skills/standards/documentation-guidelines/SKILL.md)
+- [Naming Conventions](.ai/skills/standards/naming-conventions/SKILL.md)
 
 
 

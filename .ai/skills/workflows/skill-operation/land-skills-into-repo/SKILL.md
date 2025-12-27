@@ -45,7 +45,7 @@ This skill writes:
 
 The script always produces a plan/report to stdout; it can also emit JSON via `--json-report`.
 
-## Workflow
+## Steps
 ### Step 1: Dry-run (MUST)
 From the directory that contains this `SKILL.md` (the "skill root"), run:
 
@@ -99,10 +99,23 @@ node .ai/scripts/sync-skills.js --scope current --providers both
 
 This generates lightweight wrapper stubs in `.codex/skills/` and `.claude/skills/` that point to the SSOT.
 
+## Verification
+
+- [ ] Dry-run (`--plan`) completed before apply
+- [ ] Plan output reviewed for expected changes
+- [ ] Apply completed without errors
+- [ ] Verification (`--verify`) passed
+- [ ] Every installed skill has valid YAML frontmatter
+- [ ] Provider stubs synced after landing
+
 ## Boundaries
-- The script MUST NOT delete or prune anything unless `--prune` is explicitly set.
-- The script MUST default to a non-destructive mode (`--plan`) when `--apply` is not provided.
-- The script SHOULD create backups before overwriting if `--backup` is set.
+
+- MUST NOT apply without reviewing dry-run plan first
+- MUST NOT delete or prune anything unless `--prune` is explicitly set
+- MUST NOT skip verification after apply
+- SHOULD create backups before overwriting (`--backup`)
+- SHOULD default to non-destructive mode (`--plan`) when `--apply` is not provided
+- SHOULD sync provider stubs after landing skills
 
 ## Included assets
 - `./scripts/land_skills.py`: installer/verifier (stdlib-only Python).

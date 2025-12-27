@@ -61,8 +61,9 @@ Optional inputs:
 
 - Before starting, check for existing `init/.init-state.json`
 - If found, resume from recorded state (ask user to confirm)
-- If not found, run `node init-pipeline.js start` to create initial state
-- State is automatically updated by pipeline commands
+- If not found, run `node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js start` to create initial state
+- **Validation fields** (`validated`) are automatically updated by `check-docs` and `validate` commands
+- **Approval fields** (`userApproved`) and **stage transitions** are updated via `approve --stage <A|B|C>` command
 - State file will be deleted when `cleanup-init` is run
 
 ### Rule 2: Mandatory Checkpoints
@@ -82,7 +83,7 @@ Optional inputs:
 
 ### Stage A: interview → requirement docs (verifiable)
 
-1. **Initialize state**: Run `node init-pipeline.js start` to create `init/.init-state.json`.
+1. **Initialize state**: Run `node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js start` to create `init/.init-state.json`.
 2. Use `templates/conversation-prompts.md` to run a structured requirements interview.
 3. Update state as each question is answered (`stageA.mustAsk.*`).
 4. Draft the four Stage A documents using templates under `templates/`.
@@ -100,7 +101,11 @@ node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js c
 ```
 
 7. **CHECKPOINT A→B**: Use prompt from `templates/stage-checkpoints.md` to request user approval.
-8. Wait for explicit user approval before proceeding.
+8. Wait for explicit user approval, then run:
+
+```bash
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage A
+```
 
 ### Stage B: requirements → blueprint (machine-readable)
 
@@ -125,7 +130,11 @@ node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js s
 
 4. **Self-review**: Complete Stage B checklist in `templates/quality-checklist.md`.
 5. **CHECKPOINT B→C**: Use prompt from `templates/stage-checkpoints.md` to request user approval.
-6. Wait for explicit user approval before proceeding.
+6. Wait for explicit user approval, then run:
+
+```bash
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage B
+```
 
 ### Stage C: scaffold + enable packs + sync wrappers
 
@@ -141,14 +150,14 @@ node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js s
 node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js apply   --blueprint docs/project/project-blueprint.json   --repo-root .   --providers codex,claude   --require-stage-a
 ```
 
-3. (Optional) Generate base config files:
+3. **Self-review**: Complete Stage C checklist in `templates/quality-checklist.md`.
+4. **CHECKPOINT C Complete**: Use prompt from `templates/stage-checkpoints.md` to confirm completion.
+5. Wait for explicit user approval, then run:
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/scaffold-configs.js   --blueprint docs/project/project-blueprint.json   --repo-root .   --apply
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage C
 ```
 
-4. **Self-review**: Complete Stage C checklist in `templates/quality-checklist.md`.
-5. **CHECKPOINT C Complete**: Use prompt from `templates/stage-checkpoints.md` to confirm completion.
 6. (Optional) Remove the bootstrap kit after user explicitly requests:
 
 ```bash
@@ -181,8 +190,17 @@ node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js c
 
 ### Scripts
 
-- `scripts/init-pipeline.js` - Main pipeline script (validate, check-docs, scaffold, apply, cleanup)
-- `scripts/scaffold-configs.js` - Config file generator (NEW)
+- `scripts/init-pipeline.js` - Main pipeline script (start, status, approve, validate, check-docs, scaffold, apply, cleanup)
+- `scripts/scaffold-configs.js` - Standalone config file generator (advanced usage, see note below)
+
+**Note on config generation:**
+
+| Entry Point | Use Case |
+|-------------|----------|
+| `apply` command (default) | Main workflow: scaffold + configs + manifest + wrapper sync in one step |
+| `scaffold-configs.js` | Advanced: regenerate config files only, without running the full pipeline |
+
+The `apply` command generates config files by default. Use `--skip-configs` to disable this. The standalone `scaffold-configs.js` is useful when you only need to update configs (e.g., after editing the blueprint) without re-running the entire scaffold process.
 
 ### Examples
 

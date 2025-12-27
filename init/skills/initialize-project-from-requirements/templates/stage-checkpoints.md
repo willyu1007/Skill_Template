@@ -49,7 +49,10 @@ After ALL of these conditions are met:
 
 - Wait for explicit user approval
 - If user requests changes, iterate until approved
-- Record approval in `init/.init-state.json` (`stageA.userApproved: true`)
+- Once user approves, run:
+  ```bash
+  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage A
+  ```
 
 ---
 
@@ -104,7 +107,10 @@ After ALL of these conditions are met:
 
 - Wait for explicit user approval
 - Show pack suggestions and let user decide
-- Record approval in `init/.init-state.json` (`stageB.userApproved: true`)
+- Once user approves, run:
+  ```bash
+  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage B
+  ```
 
 ---
 
@@ -159,8 +165,11 @@ After ALL of these conditions are met:
 ### AI MUST
 
 - Wait for explicit user confirmation
+- Once user confirms, run:
+  ```bash
+  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage C
+  ```
 - Only run cleanup-init if user explicitly requests it
-- Record completion in `init/.init-state.json` (`stage: "complete"`)
 
 ---
 

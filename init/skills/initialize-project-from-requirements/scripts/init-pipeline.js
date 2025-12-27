@@ -45,6 +45,11 @@ Commands:
     --repo-root <path>          Repo root (default: cwd)
     Check current stage completion and prompt for next stage.
 
+  approve
+    --stage <A|B|C>             Stage to approve (required)
+    --repo-root <path>          Repo root (default: cwd)
+    Approve current stage and advance to next stage (after user review).
+
   validate
     --blueprint <path>          Blueprint JSON path (required)
     --repo-root <path>          Repo root (default: cwd)
@@ -87,6 +92,7 @@ Examples:
   node .../init-pipeline.js status
   node .../init-pipeline.js check-docs --docs-root docs/project
   node .../init-pipeline.js validate --blueprint docs/project/project-blueprint.json
+  node .../init-pipeline.js approve --stage A
   node .../init-pipeline.js apply --blueprint docs/project/project-blueprint.json --providers codex,claude
 `;
   console.log(msg.trim());
@@ -311,7 +317,7 @@ function printStatus(state, repoRoot) {
       console.log('│    2. 运行: check-docs --docs-root docs/project');
     } else if (!progress.stageA.userApproved) {
       console.log('│    请用户审查 Stage A 文档并确认');
-      console.log('│    确认后运行: advance');
+      console.log('│    确认后运行: approve --stage A');
     }
   } else if (progress.stage === 'B') {
     if (!progress.stageB.validated) {
@@ -319,14 +325,14 @@ function printStatus(state, repoRoot) {
       console.log('│    2. 运行: validate --blueprint docs/project/project-blueprint.json');
     } else if (!progress.stageB.userApproved) {
       console.log('│    请用户审查蓝图并确认');
-      console.log('│    确认后运行: advance');
+      console.log('│    确认后运行: approve --stage B');
     }
   } else if (progress.stage === 'C') {
     if (!progress.stageC.wrappersSynced) {
       console.log('│    运行: apply --blueprint docs/project/project-blueprint.json');
     } else if (!progress.stageC.userApproved) {
       console.log('│    初始化基本完成，请用户确认');
-      console.log('│    确认后可选运行: cleanup-init --apply --i-understand');
+      console.log('│    确认后运行: approve --stage C');
     }
   } else if (progress.stage === 'complete') {
     console.log('│    初始化已完成！');
@@ -845,9 +851,8 @@ function main() {
       console.log('\n== Stage A → B 检查点 ==\n');
       console.log('Stage A 文档已验证通过。');
       console.log('请确认用户已审查并批准 docs/project/ 下的需求文档。');
-      console.log('\n如果用户已确认，请手动更新状态：');
-      console.log('  将 init/.init-state.json 中 stageA.userApproved 设为 true');
-      console.log('  将 stage 设为 "B"');
+      console.log('\n如果用户已确认，请运行以下命令批准并进入下一阶段：');
+      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage A');
       process.exit(0);
     }
 
@@ -858,9 +863,8 @@ function main() {
       console.log('\n== Stage B → C 检查点 ==\n');
       console.log('Stage B 蓝图已验证通过。');
       console.log('请确认用户已审查并批准 docs/project/project-blueprint.json。');
-      console.log('\n如果用户已确认，请手动更新状态：');
-      console.log('  将 init/.init-state.json 中 stageB.userApproved 设为 true');
-      console.log('  将 stage 设为 "C"');
+      console.log('\n如果用户已确认，请运行以下命令批准并进入下一阶段：');
+      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage B');
       process.exit(0);
     }
 
@@ -869,18 +873,88 @@ function main() {
         die('[error] Stage C 尚未完成，请先运行 apply');
       }
       console.log('\n== Stage C 完成检查点 ==\n');
-      console.log('初始化已完成！');
-      console.log('\n可选：运行 cleanup-init --apply --i-understand 删除 init/ 目录');
-      
-      state.stage = 'complete';
-      state.stageC.userApproved = true;
-      addHistoryEvent(state, 'init_completed', 'Initialization completed');
-      saveState(repoRoot, state);
+      console.log('脚手架和技能包已应用。');
+      console.log('请确认用户已审查初始化结果。');
+      console.log('\n如果用户已确认，请运行以下命令完成初始化：');
+      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage C');
+      console.log('\n可选：完成后运行 cleanup-init --apply --i-understand 删除 init/ 目录');
       process.exit(0);
     }
 
     console.log('[info] 初始化已完成');
     process.exit(0);
+  }
+
+  // ========== approve ==========
+  if (command === 'approve') {
+    const stageArg = (opts['stage'] || '').toUpperCase();
+    if (!['A', 'B', 'C'].includes(stageArg)) {
+      die('[error] --stage 是必需的，有效值为: A, B, C');
+    }
+
+    const state = loadState(repoRoot);
+    if (!state) {
+      die('[error] 未检测到初始化状态，请先运行 "start" 命令');
+    }
+
+    const progress = getStageProgress(state);
+
+    if (stageArg === 'A') {
+      if (progress.stage !== 'A') {
+        die(`[error] 当前阶段为 ${progress.stage}，无法批准 Stage A`);
+      }
+      if (!progress.stageA.validated) {
+        die('[error] Stage A 文档尚未验证，请先运行 check-docs');
+      }
+      
+      state.stageA.userApproved = true;
+      state.stage = 'B';
+      addHistoryEvent(state, 'stage_a_approved', 'User approved Stage A, advancing to Stage B');
+      saveState(repoRoot, state);
+      
+      console.log('[ok] Stage A 已批准');
+      console.log('[ok] 已进入 Stage B - 蓝图 (Blueprint)');
+      console.log('\n下一步: 创建 docs/project/project-blueprint.json');
+      process.exit(0);
+    }
+
+    if (stageArg === 'B') {
+      if (progress.stage !== 'B') {
+        die(`[error] 当前阶段为 ${progress.stage}，无法批准 Stage B`);
+      }
+      if (!progress.stageB.validated) {
+        die('[error] Stage B 蓝图尚未验证，请先运行 validate');
+      }
+      
+      state.stageB.userApproved = true;
+      state.stage = 'C';
+      addHistoryEvent(state, 'stage_b_approved', 'User approved Stage B, advancing to Stage C');
+      saveState(repoRoot, state);
+      
+      console.log('[ok] Stage B 已批准');
+      console.log('[ok] 已进入 Stage C - 脚手架 (Scaffold)');
+      console.log('\n下一步: 运行 apply 命令创建脚手架');
+      process.exit(0);
+    }
+
+    if (stageArg === 'C') {
+      if (progress.stage !== 'C') {
+        die(`[error] 当前阶段为 ${progress.stage}，无法批准 Stage C`);
+      }
+      if (!progress.stageC.wrappersSynced) {
+        die('[error] Stage C 尚未完成，请先运行 apply');
+      }
+      
+      state.stageC.userApproved = true;
+      state.stage = 'complete';
+      addHistoryEvent(state, 'stage_c_approved', 'User approved Stage C, initialization complete');
+      saveState(repoRoot, state);
+      
+      console.log('[ok] Stage C 已批准');
+      console.log('[ok] 初始化已完成！');
+      console.log('\n可选: 运行 cleanup-init --apply --i-understand 删除 init/ 目录');
+      process.exit(0);
+    }
   }
 
   if (command === 'validate') {
