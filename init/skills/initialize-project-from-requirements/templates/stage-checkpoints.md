@@ -4,45 +4,44 @@
 
 - **EVERY stage transition requires explicit user approval.**
 - AI MUST NOT proceed to the next stage without user saying "approved" / "continue" / "yes" or equivalent.
-- This prevents runaway automation and ensures user stays in control.
+- This prevents runaway automation and ensures the user stays in control.
 
 ---
 
-## Checkpoint A → B: Requirements Complete
+## Checkpoint A -> B: Requirements Complete
 
 ### When to Trigger
 
 After ALL of these conditions are met:
-1. All 4 Stage A docs exist under `docs/project/`
+1. All 4 Stage A docs exist under `init/stage-a-docs/`
 2. `check-docs` passes (or `--strict` if required)
 3. AI has completed the quality checklist self-review
 
 ### Prompt to User
 
 ```
-## Stage A 完成检查点
+## Stage A Completion Checkpoint
 
-我已完成需求文档的撰写：
-- ✅ requirements.md
-- ✅ non-functional-requirements.md  
-- ✅ domain-glossary.md
-- ✅ risk-open-questions.md
+I have completed the requirements documents:
+- requirements.md
+- non-functional-requirements.md
+- domain-glossary.md
+- risk-open-questions.md
 
-验证结果：
-- `check-docs`: [PASS/FAIL]
-- 质量自检: [已完成]
+Validation results:
+- check-docs: [PASS/FAIL]
+- quality checklist: [complete]
 
-### 请您审查
+### Please review
 
-1. 请查看 `docs/project/` 下的 4 个文档
-2. 确认内容符合您的预期
-3. 如有修改意见，请告诉我
+1. Review the 4 documents under `init/stage-a-docs/`
+2. Confirm the content matches your expectations
+3. Share any changes you want
 
-### 确认进入下一阶段
+### Confirm to proceed
 
-如果您对 Stage A 满意，请回复 **"继续"** 或 **"approved"**，我将开始生成项目蓝图 (Stage B)。
-
-如果需要修改，请告诉我具体的修改点。
+If Stage A looks good, reply "continue" or "approved" and I will start Stage B.
+If you need changes, tell me what to adjust.
 ```
 
 ### AI MUST
@@ -51,17 +50,17 @@ After ALL of these conditions are met:
 - If user requests changes, iterate until approved
 - Once user approves, run:
   ```bash
-  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage A
+  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage A
   ```
 
 ---
 
-## Checkpoint B → C: Blueprint Complete
+## Checkpoint B -> C: Blueprint Complete
 
 ### When to Trigger
 
 After ALL of these conditions are met:
-1. `docs/project/project-blueprint.json` exists
+1. `init/project-blueprint.json` exists
 2. `validate` command passes
 3. `suggest-packs` has been reviewed (user aware of recommended packs)
 4. AI has completed the quality checklist self-review
@@ -69,47 +68,46 @@ After ALL of these conditions are met:
 ### Prompt to User
 
 ```
-## Stage B 完成检查点
+## Stage B Completion Checkpoint
 
-我已生成项目蓝图：
-- 📄 docs/project/project-blueprint.json
+I have generated the project blueprint:
+- init/project-blueprint.json
 
-验证结果：
-- `validate`: [PASS/FAIL]
-- 推荐技能包: [workflows, backend, frontend, ...]
-- 当前技能包: [workflows, backend, frontend, ...]
+Validation results:
+- validate: [PASS/FAIL]
+- recommended packs: [workflows, backend, frontend, ...]
+- current packs: [workflows, backend, frontend, ...]
 
-### 蓝图摘要
+### Blueprint summary
 
-| 字段 | 值 |
-|------|-----|
-| 项目名称 | {{project.name}} |
-| 仓库布局 | {{repo.layout}} |
-| 语言 | {{repo.language}} |
-| 前端 | {{capabilities.frontend.enabled}} |
-| 后端 | {{capabilities.backend.enabled}} |
-| 数据库 | {{capabilities.database.enabled}} |
+| Field | Value |
+|------|-------|
+| project.name | {{project.name}} |
+| repo.layout | {{repo.layout}} |
+| repo.language | {{repo.language}} |
+| frontend enabled | {{capabilities.frontend.enabled}} |
+| backend enabled | {{capabilities.backend.enabled}} |
+| database enabled | {{capabilities.database.enabled}} |
 
-### 请您审查
+### Please review
 
-1. 请查看 `docs/project/project-blueprint.json`
-2. 确认技能包选择符合项目需求
-3. 如有修改意见，请告诉我
+1. Review `init/project-blueprint.json`
+2. Confirm skill pack selection matches the project
+3. Share any changes you want
 
-### 确认进入下一阶段
+### Confirm to proceed
 
-如果您对 Stage B 满意，请回复 **"继续"** 或 **"approved"**，我将开始创建项目脚手架 (Stage C)。
-
-如果需要修改，请告诉我具体的修改点。
+If Stage B looks good, reply "continue" or "approved" and I will start Stage C.
+If you need changes, tell me what to adjust.
 ```
 
 ### AI MUST
 
 - Wait for explicit user approval
-- Show pack suggestions and let user decide
+- Show pack suggestions and let the user decide
 - Once user approves, run:
   ```bash
-  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage B
+  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage B
   ```
 
 ---
@@ -127,39 +125,36 @@ After ALL of these conditions are met:
 ### Prompt to User
 
 ```
-## Stage C 完成检查点
+## Stage C Completion Checkpoint
 
-项目初始化已完成：
+Initialization is complete.
 
-### 创建的目录结构
+### Created directory structure
 
 {{scaffold_summary}}
 
-### 启用的技能包
+### Enabled skill packs
 
 {{enabled_packs}}
 
-### 验证
+### Verification
 
-- `sync-manifest.json`: 已更新
-- Provider wrappers: 已生成
-  - `.codex/skills/`: {{codex_skill_count}} 个技能
-  - `.claude/skills/`: {{claude_skill_count}} 个技能
+- sync-manifest.json: updated
+- Provider wrappers generated:
+  - .codex/skills/: {{codex_skill_count}} skills
+  - .claude/skills/: {{claude_skill_count}} skills
 
-### 下一步
+### Next steps
 
-1. **保留文档**: `docs/project/` 下的文档是项目的需求基线，请保留
-2. **清理 init 目录** (可选): 如果您确定不再需要初始化工具，可以运行:
-   ```bash
-   node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js cleanup-init --repo-root . --apply --i-understand
-   ```
-3. **开始开发**: 您现在可以使用已启用的技能开始开发了
+1. Archive docs (optional): to keep Stage A docs and blueprint in `docs/project/`, run:
+   node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs cleanup-init --repo-root . --apply --i-understand --archive
+2. Cleanup init (optional): removes the initialization kit after archiving
+3. Start development: you can now use the enabled skills
 
-### 确认初始化完成
+### Confirm completion
 
-如果您确认初始化已完成，请回复 **"完成"** 或 **"done"**。
-
-如果您想清理 init 目录，请回复 **"清理 init"** 或 **"cleanup init"**。
+If you confirm initialization is complete, reply "done".
+If you want to clean up init, reply "cleanup init".
 ```
 
 ### AI MUST
@@ -167,16 +162,16 @@ After ALL of these conditions are met:
 - Wait for explicit user confirmation
 - Once user confirms, run:
   ```bash
-  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage C
+  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage C
   ```
-- Only run cleanup-init if user explicitly requests it
+- Only run cleanup-init if the user explicitly requests it
 
 ---
 
 ## Emergency Stop
 
-At any point, if user says:
-- "停止" / "stop" / "cancel" / "abort"
+At any point, if the user says:
+- "stop" / "cancel" / "abort"
 
 AI MUST:
 1. Immediately stop the current operation
@@ -193,7 +188,6 @@ If a session is interrupted, AI should:
 
 1. Check for existing `init/.init-state.json`
 2. If found, resume from the recorded state
-3. Prompt user: "检测到未完成的初始化状态，是否从 Stage [X] 继续？"
+3. Prompt the user: "Detected an incomplete init state. Resume from Stage [X]?"
 
 **Note**: The state file is stored in `init/` and will be deleted when `cleanup-init` is run. This is intentional - the state is temporary working data, not a permanent record.
-

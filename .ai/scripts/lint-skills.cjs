@@ -33,7 +33,7 @@ function printHelp() {
   console.log([
     'Lint skills for quality standards.',
     '',
-    'Usage: node .ai/scripts/lint-skills.js [options]',
+    'Usage: node .ai/scripts/lint-skills.cjs [options]',
     '',
     'Options:',
     '  --fix           Auto-fix issues where possible (not implemented yet)',

@@ -1,6 +1,6 @@
 # Example - Blueprint review checklist
 
-Before applying Stage C, review `docs/project/project-blueprint.json`:
+Before applying Stage C, review `init/project-blueprint.json`:
 
 ## Checklist
 
@@ -13,12 +13,12 @@ Before applying Stage C, review `docs/project/project-blueprint.json`:
 ## Validate
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js validate   --blueprint docs/project/project-blueprint.json
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs validate   --blueprint init/project-blueprint.json
 ```
 
 ## Reconcile packs (recommended)
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js suggest-packs   --blueprint docs/project/project-blueprint.json   --repo-root .
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs suggest-packs   --blueprint init/project-blueprint.json   --repo-root .
 ```
 

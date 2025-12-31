@@ -1,49 +1,37 @@
-# Stage A - Requirements (DoD-driven)
+# Stage A - Requirements
 
 ## Goal
 
-Produce a verifiable set of requirement documents under `docs/project/`.
+Produce a verifiable set of requirement documents under `init/stage-a-docs/`.
 
-## Outputs (files)
+## Outputs
 
-- `docs/project/requirements.md`
-- `docs/project/non-functional-requirements.md`
-- `docs/project/domain-glossary.md`
-- `docs/project/risk-open-questions.md`
+| File | Purpose |
+|------|---------|
+| `requirements.md` | Goals, non-goals, user journeys |
+| `non-functional-requirements.md` | Performance, security, availability |
+| `domain-glossary.md` | Key terms definitions |
+| `risk-open-questions.md` | Unresolved decisions |
 
-Templates:
-- `init/skills/initialize-project-from-requirements/templates/`
+## Definition of Done
 
-Interview guide:
-- `init/skills/initialize-project-from-requirements/templates/conversation-prompts.md`
+- [ ] `requirements.md` has explicit Goals (MUST) and Non-goals (OUT)
+- [ ] User journeys have acceptance criteria
+- [ ] `non-functional-requirements.md` has measurable targets or TBD items
+- [ ] `domain-glossary.md` defines all domain terms
+- [ ] `risk-open-questions.md` consolidates all TBD (owner + options + due)
 
-## Steps
-
-1. Run a structured interview (start with MUST-ask questions, then branch modules).
-2. Draft the four documents from templates.
-3. Iterate with the user until the Definition of Done is met.
-
-## Definition of Done (DoD)
-
-- `requirements.md` includes explicit:
-  - Goals (MUST)
-  - Non-goals (OUT)
-  - Core user journeys with acceptance criteria
-- `non-functional-requirements.md` includes measurable targets or explicit TBD items.
-- `domain-glossary.md` defines all domain terms used in requirements.
-- `risk-open-questions.md` consolidates all unresolved decisions (owner + options + decision due).
-
-## Verification
-
-Run:
+## Commands
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js check-docs --docs-root docs/project
+# Validate docs
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs check-docs
+
+# Approve and advance to Stage B
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage A
 ```
 
-Strict gate (optional):
+## See also
 
-```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js check-docs --docs-root docs/project --strict
-```
-
+- Templates: `init/skills/initialize-project-from-requirements/templates/`
+- Full reference: `init/reference.md`

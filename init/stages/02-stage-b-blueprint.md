@@ -1,41 +1,44 @@
-# Stage B - Blueprint (machine-readable)
+# Stage B - Blueprint
 
 ## Goal
 
-Convert Stage A documents into a JSON blueprint that can drive scaffolding and skill selection.
+Convert Stage A documents into a JSON blueprint that drives scaffolding and skill selection.
 
-## Output (file)
+## Output
 
-- `docs/project/project-blueprint.json`
+- `init/project-blueprint.json`
 
-Start from:
-- `init/skills/initialize-project-from-requirements/templates/project-blueprint.example.json`
+## Required Fields
 
-Schema reference:
-- `init/skills/initialize-project-from-requirements/templates/project-blueprint.schema.json`
+| Field | Description |
+|-------|-------------|
+| `repo.layout` | `single` or `monorepo` |
+| `repo.language` | Primary programming language |
+| `capabilities.*` | Enabled features (frontend, backend, database) |
+| `skills.packs` | At minimum include `workflows` |
 
-## Steps
+## Definition of Done
 
-1. Encode only the decisions needed for scaffolding and skill selection.
-2. Keep implementation detail in Stage A docs (not in the blueprint).
-3. Populate tech stack fields:
-   - `repo.language`: primary programming language (typescript, javascript, python, go, java, dotnet, other)
-   - `repo.packageManager`: package manager (npm, pnpm, yarn, pip, poetry, go, maven, gradle, dotnet, other)
-   - `capabilities.frontend.framework`: frontend framework (if frontend is enabled)
-   - `capabilities.backend.framework`: backend framework (if backend is enabled)
-4. Select `skills.packs` (at minimum include `workflows`).
+- [ ] Blueprint passes validation
+- [ ] All required fields are populated
+- [ ] Tech stack fields match Stage A constraints
+- [ ] `skills.packs` includes recommended packs for enabled capabilities
 
-## Verification
-
-Blueprint validation:
+## Commands
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js validate   --blueprint docs/project/project-blueprint.json
+# Validate blueprint
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs validate
+
+# Check pack recommendations
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs suggest-packs
+
+# Approve and advance to Stage C
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage B
 ```
 
-Pack reconciliation (recommended):
+## See also
 
-```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js suggest-packs   --blueprint docs/project/project-blueprint.json   --repo-root .
-```
-
+- Example: `init/skills/initialize-project-from-requirements/templates/project-blueprint.example.json`
+- Schema: `init/skills/initialize-project-from-requirements/templates/project-blueprint.schema.json`
+- Full reference: `init/reference.md`

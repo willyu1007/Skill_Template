@@ -27,13 +27,13 @@ Template repository. Users clone this to start new AI-friendly projects.
 
 1. Create `.ai/skills/[skill-name]/SKILL.md`
 2. Add supporting files alongside `SKILL.md` (for example `reference.md`, `examples.md`, `scripts/`, `templates/`)
-3. Run `node .ai/scripts/sync-skills.js`
+3. Run `node .ai/scripts/sync-skills.cjs`
 
 ### Add New Workflow (as a skill)
 
 1. Create `.ai/skills/[workflow-name]/SKILL.md`
 2. Include YAML frontmatter with `name` and `description`
-3. Run `node .ai/scripts/sync-skills.js`
+3. Run `node .ai/scripts/sync-skills.cjs`
 
 ## Available Workflows
 

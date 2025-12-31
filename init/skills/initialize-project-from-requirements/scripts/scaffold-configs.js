@@ -3,7 +3,7 @@
  * scaffold-configs.js
  * 
  * Generates base configuration files from blueprint.
- * This is an optional enhancement to the main init-pipeline.js scaffold command.
+ * This is an optional enhancement to the main init-pipeline.cjs scaffold command.
  * 
  * Usage:
  *   node scaffold-configs.js --blueprint <path> --repo-root <path> [--apply]
@@ -84,15 +84,15 @@ function getTemplateDir(language, packageManager) {
 function renderTemplate(content, variables) {
   let result = content;
   for (const [key, value] of Object.entries(variables)) {
-    const pattern = new RegExp(`\\{\\{${key.replace('.', '\\.')}\\}\\}`, 'g');
-    result = result.replace(pattern, value || '');
+    const pattern = new RegExp(`\\{\\{${key.replace(/\./g, '\\.')}\\}\\}`, 'g');
+    result = result.replace(pattern, value != null ? String(value) : '');
   }
   return result;
 }
 
 function flattenObject(obj, prefix = '') {
   const result = {};
-  for (const [key, value] of Object.entries(obj)) {
+  for (const [key, value] of Object.entries(obj || {})) {
     const fullKey = prefix ? `${prefix}.${key}` : key;
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       Object.assign(result, flattenObject(value, fullKey));
@@ -106,13 +106,13 @@ function flattenObject(obj, prefix = '') {
 function generateConfigs(blueprint, repoRoot, apply, force) {
   const results = [];
   const repo = blueprint.repo || {};
-  const language = repo.language || 'typescript';
-  const packageManager = repo.packageManager || 'pnpm';
+  const language = (repo.language || 'typescript').toLowerCase();
+  const packageManager = (repo.packageManager || 'pnpm').toLowerCase();
   const layout = repo.layout || 'single';
   
   const templateDir = getTemplateDir(language, packageManager);
   if (!templateDir) {
-    console.log(`[skip] No templates found for ${language}-${packageManager}`);
+    results.push({ file: '(none)', action: 'skip', reason: `no templates for ${language}-${packageManager}` });
     return results;
   }
   
@@ -120,7 +120,13 @@ function generateConfigs(blueprint, repoRoot, apply, force) {
   const variables = flattenObject(blueprint);
   
   // Read template files
-  const templateFiles = fs.readdirSync(templateDir).filter(f => f.endsWith('.template'));
+  let templateFiles;
+  try {
+    templateFiles = fs.readdirSync(templateDir).filter(f => f.endsWith('.template'));
+  } catch (e) {
+    results.push({ file: templateDir, action: 'error', reason: e.message });
+    return results;
+  }
   
   for (const templateFile of templateFiles) {
     const targetName = templateFile.replace('.template', '');
@@ -128,7 +134,7 @@ function generateConfigs(blueprint, repoRoot, apply, force) {
     const targetPath = path.join(repoRoot, targetName);
     
     // Skip workspace file for single layout
-    if (targetName === 'pnpm-workspace.yaml' && layout !== 'monorepo') {
+    if ((targetName === 'pnpm-workspace.yaml' || targetName === 'pnpm-workspace.yml') && layout !== 'monorepo') {
       results.push({ file: targetName, action: 'skip', reason: 'not monorepo' });
       continue;
     }

@@ -113,11 +113,12 @@ Run this checklist after `apply` command, **before** cleanup.
 - [ ] Does `.ai/skills/_meta/sync-manifest.json` reflect `skills.packs`?
 - [ ] Are `.codex/skills/` and `.claude/skills/` wrappers generated?
 - [ ] Can you list the enabled skills and verify they match expectations?
+- [ ] If the user opted out of `agent_builder`, is `.ai/skills/workflows/agent` removed and wrappers re-synced?
 
 ### C3. Cleanup Readiness
 
-- [ ] Are all Stage A docs preserved in `docs/project/`?
-- [ ] Is `project-blueprint.json` preserved?
+- [ ] Are Stage A docs present in `init/stage-a-docs/` (or archived to `docs/project/` if cleanup is requested)?
+- [ ] Is `init/project-blueprint.json` present (or archived to `docs/project/` if cleanup is requested)?
 - [ ] Is `.ai/skills/_meta/sync-manifest.json` preserved?
 - [ ] Are you confident the init kit is no longer needed?
 
@@ -138,4 +139,3 @@ Run this checklist after `apply` command, **before** cleanup.
 - Stage A: `check-docs --strict` should pass AND this checklist should pass.
 - Stage B: `validate` should pass AND this checklist should pass.
 - Stage C: `apply` should complete AND this checklist should pass.
-

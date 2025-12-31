@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * init-pipeline.js
+ * init-pipeline.cjs
  *
  * Dependency-free helper for a 3-stage, verifiable init pipeline:
  *
- *   Stage A: requirements docs under `docs/project/`
- *   Stage B: blueprint JSON at `docs/project/project-blueprint.json`
+ *   Stage A: requirements docs under `init/stage-a-docs/`
+ *   Stage B: blueprint JSON at `init/project-blueprint.json`
  *   Stage C: minimal scaffold + skill pack manifest update + wrapper sync
  *
  * Commands:
@@ -29,7 +29,7 @@ const childProcess = require('child_process');
 function usage(exitCode = 0) {
   const msg = `
 Usage:
-  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js <command> [options]
+  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs <command> [options]
 
 Commands:
   start
@@ -51,49 +51,63 @@ Commands:
     Approve current stage and advance to next stage (after user review).
 
   validate
-    --blueprint <path>          Blueprint JSON path (required)
+    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/project-blueprint.json)
     --repo-root <path>          Repo root (default: cwd)
     --format <text|json>        Output format (default: text)
 
   check-docs
-    --docs-root <path>          Stage A docs root (default: <repo-root>/docs/project)
+    --docs-root <path>          Stage A docs root (default: <repo-root>/init/stage-a-docs)
     --repo-root <path>          Repo root (default: cwd)
     --strict                    Treat warnings as errors (exit non-zero)
     --format <text|json>        Output format (default: text)
 
   suggest-packs
-    --blueprint <path>          Blueprint JSON path (required)
+    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/project-blueprint.json)
     --repo-root <path>          Repo root (default: cwd)
     --format <text|json>        Output format (default: text)
     --write                      Add missing recommended packs into blueprint (safe-add only)
 
   scaffold
-    --blueprint <path>          Blueprint JSON path (required)
+    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/project-blueprint.json)
     --repo-root <path>          Repo root (default: cwd)
     --apply                      Actually create directories/files (default: dry-run)
 
   apply
-    --blueprint <path>          Blueprint JSON path (required)
+    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/project-blueprint.json)
     --repo-root <path>          Repo root (default: cwd)
     --providers <both|codex|claude|codex,claude>
                                 Providers to sync (default: both)
     --require-stage-a           Run 'check-docs --strict' and fail if it does not pass
     --skip-configs              Skip generating config files (package.json, etc.)
+    --skip-agent-builder        Remove .ai/skills/workflows/agent before wrapper sync (requires --i-understand)
     --cleanup-init              Remove <repo-root>/init after success (requires --i-understand)
     --i-understand              Required acknowledgement for destructive actions
 
   cleanup-init
     --repo-root <path>          Repo root (default: cwd)
     --apply                      Actually remove init/ (default: dry-run)
+    --archive                    Archive Stage A docs + blueprint to docs/project before cleanup
+    --archive-docs               Archive Stage A docs only before cleanup
+    --archive-blueprint          Archive blueprint only before cleanup
+    --i-understand              Required acknowledgement (refuses without it)
+
+  prune-agent-builder
+    --repo-root <path>          Repo root (default: cwd)
+    --apply                      Actually remove .ai/skills/workflows/agent (default: dry-run)
+    --sync-after                 Re-sync wrappers after pruning (default: true)
+    --providers <both|codex|claude>
+                                Providers to sync (default: both)
     --i-understand              Required acknowledgement (refuses without it)
 
 Examples:
-  node .../init-pipeline.js start
-  node .../init-pipeline.js status
-  node .../init-pipeline.js check-docs --docs-root docs/project
-  node .../init-pipeline.js validate --blueprint docs/project/project-blueprint.json
-  node .../init-pipeline.js approve --stage A
-  node .../init-pipeline.js apply --blueprint docs/project/project-blueprint.json --providers codex,claude
+  node .../init-pipeline.cjs start
+  node .../init-pipeline.cjs status
+  node .../init-pipeline.cjs check-docs --docs-root init/stage-a-docs
+  node .../init-pipeline.cjs validate --blueprint init/project-blueprint.json
+  node .../init-pipeline.cjs approve --stage A
+  node .../init-pipeline.cjs apply --blueprint init/project-blueprint.json --providers codex,claude
+  node .../init-pipeline.cjs prune-agent-builder --apply --i-understand
+  node .../init-pipeline.cjs cleanup-init --apply --i-understand --archive
 `;
   console.log(msg.trim());
   process.exit(exitCode);
@@ -274,68 +288,68 @@ function getStageProgress(state) {
 
 function printStatus(state, repoRoot) {
   const progress = getStageProgress(state);
-  const stageNames = { A: '需求 (Requirements)', B: '蓝图 (Blueprint)', C: '脚手架 (Scaffold)', complete: '完成' };
+  const stageNames = { A: 'Requirements', B: 'Blueprint', C: 'Scaffold', complete: 'Complete' };
 
   console.log('');
   console.log('┌─────────────────────────────────────────────────────────┐');
-  console.log('│  初始化状态 (Init State)                                │');
+  console.log('│  Init Status                                            │');
   console.log('├─────────────────────────────────────────────────────────┤');
-  console.log(`│  当前阶段: Stage ${progress.stage} - ${stageNames[progress.stage] || progress.stage}`);
+  console.log(`│  Current stage: Stage ${progress.stage} - ${stageNames[progress.stage] || progress.stage}`);
   console.log('│');
 
   if (progress.stage === 'A' || progress.stage === 'B' || progress.stage === 'C') {
-    console.log('│  Stage A 进度:');
-    console.log(`│    必问问题: ${progress.stageA.mustAskAnswered}/${progress.stageA.mustAskTotal} 已完成`);
-    console.log(`│    文档撰写: ${progress.stageA.docsWritten}/${progress.stageA.docsTotal} 已完成`);
-    console.log(`│    验证状态: ${progress.stageA.validated ? '✓ 已验证' : '✗ 未验证'}`);
-    console.log(`│    用户确认: ${progress.stageA.userApproved ? '✓ 已确认' : '✗ 未确认'}`);
+    console.log('│  Stage A Progress:');
+    console.log(`│    Must-ask: ${progress.stageA.mustAskAnswered}/${progress.stageA.mustAskTotal} complete`);
+    console.log(`│    Docs written: ${progress.stageA.docsWritten}/${progress.stageA.docsTotal} complete`);
+    console.log(`│    Validation: ${progress.stageA.validated ? '✓ validated' : '✗ not validated'}`);
+    console.log(`│    User approval: ${progress.stageA.userApproved ? '✓ approved' : '✗ not approved'}`);
   }
 
   if (progress.stage === 'B' || progress.stage === 'C') {
     console.log('│');
-    console.log('│  Stage B 进度:');
-    console.log(`│    蓝图起草: ${progress.stageB.drafted ? '✓' : '✗'}`);
-    console.log(`│    蓝图验证: ${progress.stageB.validated ? '✓' : '✗'}`);
-    console.log(`│    技能包审查: ${progress.stageB.packsReviewed ? '✓' : '✗'}`);
-    console.log(`│    用户确认: ${progress.stageB.userApproved ? '✓' : '✗'}`);
+    console.log('│  Stage B Progress:');
+    console.log(`│    Drafted: ${progress.stageB.drafted ? '✓' : '✗'}`);
+    console.log(`│    Validated: ${progress.stageB.validated ? '✓' : '✗'}`);
+    console.log(`│    Packs reviewed: ${progress.stageB.packsReviewed ? '✓' : '✗'}`);
+    console.log(`│    User approval: ${progress.stageB.userApproved ? '✓' : '✗'}`);
   }
 
   if (progress.stage === 'C' || progress.stage === 'complete') {
     console.log('│');
-    console.log('│  Stage C 进度:');
-    console.log(`│    脚手架创建: ${progress.stageC.scaffoldApplied ? '✓' : '✗'}`);
-    console.log(`│    配置文件: ${progress.stageC.configsGenerated ? '✓' : '✗'}`);
-    console.log(`│    清单更新: ${progress.stageC.manifestUpdated ? '✓' : '✗'}`);
-    console.log(`│    Wrapper同步: ${progress.stageC.wrappersSynced ? '✓' : '✗'}`);
+    console.log('│  Stage C Progress:');
+    console.log(`│    Scaffold applied: ${progress.stageC.scaffoldApplied ? '✓' : '✗'}`);
+    console.log(`│    Configs generated: ${progress.stageC.configsGenerated ? '✓' : '✗'}`);
+    console.log(`│    Manifest updated: ${progress.stageC.manifestUpdated ? '✓' : '✗'}`);
+    console.log(`│    Wrappers synced: ${progress.stageC.wrappersSynced ? '✓' : '✗'}`);
   }
 
   console.log('│');
-  console.log('│  下一步:');
+  console.log('│  Next steps:');
   if (progress.stage === 'A') {
     if (!progress.stageA.validated) {
-      console.log('│    1. 完成需求访谈并撰写文档');
-      console.log('│    2. 运行: check-docs --docs-root docs/project');
+      console.log('│    1. Complete the interview and draft the docs');
+      console.log('│    2. Run: check-docs --docs-root init/stage-a-docs');
     } else if (!progress.stageA.userApproved) {
-      console.log('│    请用户审查 Stage A 文档并确认');
-      console.log('│    确认后运行: approve --stage A');
+      console.log('│    Ask the user to review Stage A docs');
+      console.log('│    After approval run: approve --stage A');
     }
   } else if (progress.stage === 'B') {
     if (!progress.stageB.validated) {
-      console.log('│    1. 创建 docs/project/project-blueprint.json');
-      console.log('│    2. 运行: validate --blueprint docs/project/project-blueprint.json');
+      console.log('│    1. Create init/project-blueprint.json');
+      console.log('│    2. Run: validate --blueprint init/project-blueprint.json');
     } else if (!progress.stageB.userApproved) {
-      console.log('│    请用户审查蓝图并确认');
-      console.log('│    确认后运行: approve --stage B');
+      console.log('│    Ask the user to review the blueprint');
+      console.log('│    After approval run: approve --stage B');
     }
   } else if (progress.stage === 'C') {
     if (!progress.stageC.wrappersSynced) {
-      console.log('│    运行: apply --blueprint docs/project/project-blueprint.json');
+      console.log('│    Run: apply --blueprint init/project-blueprint.json');
     } else if (!progress.stageC.userApproved) {
-      console.log('│    初始化基本完成，请用户确认');
-      console.log('│    确认后运行: approve --stage C');
+      console.log('│    Initialization ready for review');
+      console.log('│    After approval run: approve --stage C');
     }
   } else if (progress.stage === 'complete') {
-    console.log('│    初始化已完成！');
+    console.log('│    Initialization complete!');
   }
 
   console.log('└─────────────────────────────────────────────────────────┘');
@@ -364,7 +378,7 @@ function getConfigTemplateDir(language, packageManager) {
   };
 
   const key = `${language}-${packageManager}`.toLowerCase();
-  let templateName = mappings[key] || mappings[language] || null;
+  let templateName = mappings[key] || mappings[language.toLowerCase()] || null;
 
   if (!templateName) return null;
 
@@ -638,15 +652,43 @@ function writeFileIfMissing(filePath, content, apply) {
   return { op: 'write', path: filePath, mode: 'applied' };
 }
 
+function ensureInitTemplates(docsRoot, blueprintPath, apply) {
+  const results = [];
+  results.push(ensureDir(docsRoot, apply));
+
+  const docTemplates = [
+    { template: 'requirements.template.md', target: 'requirements.md' },
+    { template: 'non-functional-requirements.template.md', target: 'non-functional-requirements.md' },
+    { template: 'domain-glossary.template.md', target: 'domain-glossary.md' },
+    { template: 'risk-open-questions.template.md', target: 'risk-open-questions.md' }
+  ];
+
+  for (const { template, target } of docTemplates) {
+    const templatePath = path.join(TEMPLATES_DIR, template);
+    if (!fs.existsSync(templatePath)) {
+      results.push({ op: 'skip', path: templatePath, reason: 'missing template' });
+      continue;
+    }
+    const content = fs.readFileSync(templatePath, 'utf8');
+    results.push(writeFileIfMissing(path.join(docsRoot, target), content, apply));
+  }
+
+  const blueprintTemplatePath = path.join(TEMPLATES_DIR, 'project-blueprint.example.json');
+  if (fs.existsSync(blueprintTemplatePath)) {
+    const blueprintContent = fs.readFileSync(blueprintTemplatePath, 'utf8');
+    results.push(writeFileIfMissing(blueprintPath, blueprintContent, apply));
+  } else {
+    results.push({ op: 'skip', path: blueprintTemplatePath, reason: 'missing template' });
+  }
+
+  return results;
+}
+
 function planScaffold(repoRoot, blueprint, apply) {
   const results = [];
   const repo = blueprint.repo || {};
   const caps = blueprint.capabilities || {};
   const layout = repo.layout;
-
-  // Always ensure docs directory exists (Stage A/B will live here)
-  results.push(ensureDir(path.join(repoRoot, 'docs'), apply));
-  results.push(ensureDir(path.join(repoRoot, 'docs', 'project'), apply));
 
   if (layout === 'monorepo') {
     results.push(ensureDir(path.join(repoRoot, 'apps'), apply));
@@ -744,9 +786,9 @@ function updateManifest(repoRoot, blueprint, apply) {
 }
 
 function syncWrappers(repoRoot, providers, apply) {
-  const scriptPath = path.join(repoRoot, '.ai', 'scripts', 'sync-skills.js');
+  const scriptPath = path.join(repoRoot, '.ai', 'scripts', 'sync-skills.cjs');
   if (!fs.existsSync(scriptPath)) {
-    return { op: 'skip', path: scriptPath, reason: 'sync-skills.js not found' };
+    return { op: 'skip', path: scriptPath, reason: 'sync-skills.cjs not found' };
   }
   const providersArg = providers || 'both';
   const cmd = 'node';
@@ -759,6 +801,69 @@ function syncWrappers(repoRoot, providers, apply) {
     return { op: 'run', cmd: `${cmd} ${args.join(' ')}`, mode: 'failed', exitCode: res.status };
   }
   return { op: 'run', cmd: `${cmd} ${args.join(' ')}`, mode: 'applied' };
+}
+
+function pruneAgentBuilder(repoRoot, apply) {
+  const agentDir = path.join(repoRoot, '.ai', 'skills', 'workflows', 'agent');
+  if (!fs.existsSync(agentDir)) return { op: 'skip', path: agentDir, reason: 'agent workflow not present' };
+  if (!apply) return { op: 'rm', path: agentDir, mode: 'dry-run' };
+  try {
+    fs.rmSync(agentDir, { recursive: true, force: true });
+    return { op: 'rm', path: agentDir, mode: 'applied' };
+  } catch (e) {
+    return { op: 'rm', path: agentDir, mode: 'failed', error: e.message };
+  }
+}
+
+function copyFile(src, dest, apply) {
+  if (!fs.existsSync(src)) return { op: 'copy', src, dest, mode: 'skip', reason: 'missing source' };
+  if (!apply) return { op: 'copy', src, dest, mode: 'dry-run' };
+  try {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    return { op: 'copy', src, dest, mode: 'applied' };
+  } catch (e) {
+    return { op: 'copy', src, dest, mode: 'failed', error: e.message };
+  }
+}
+
+function archiveInitArtifacts(repoRoot, docsRoot, blueprintPath, options, apply) {
+  const targetRoot = path.join(repoRoot, 'docs', 'project');
+  const actions = [];
+  const errors = [];
+
+  if (options.archiveDocs) {
+    const docNames = [
+      'requirements.md',
+      'non-functional-requirements.md',
+      'domain-glossary.md',
+      'risk-open-questions.md'
+    ];
+    for (const name of docNames) {
+      const src = path.join(docsRoot, name);
+      const dest = path.join(targetRoot, name);
+      const res = copyFile(src, dest, apply);
+      actions.push(res);
+      if (res.mode === 'skip') errors.push(`Missing Stage A doc: ${path.relative(repoRoot, src)}`);
+      if (res.mode === 'failed') errors.push(`Failed to archive doc: ${path.relative(repoRoot, src)} (${res.error})`);
+    }
+  }
+
+  if (options.archiveBlueprint) {
+    const dest = path.join(targetRoot, 'project-blueprint.json');
+    const res = copyFile(blueprintPath, dest, apply);
+    actions.push(res);
+    if (res.mode === 'skip') errors.push(`Missing blueprint: ${path.relative(repoRoot, blueprintPath)}`);
+    if (res.mode === 'failed') errors.push(`Failed to archive blueprint: ${path.relative(repoRoot, blueprintPath)} (${res.error})`);
+  }
+
+  return {
+    op: 'archive',
+    mode: apply ? 'applied' : 'dry-run',
+    targetRoot,
+    actions,
+    errors
+  };
 }
 
 function cleanupInit(repoRoot, apply) {
@@ -796,16 +901,27 @@ function main() {
   const format = (opts['format'] || 'text').toLowerCase();
 
   const repoRoot = path.resolve(opts['repo-root'] || process.cwd());
-  const blueprintPath = resolvePath(repoRoot, opts['blueprint']);
-  const docsRoot = resolvePath(repoRoot, opts['docs-root'] || path.join('docs', 'project'));
+  const blueprintPath = resolvePath(repoRoot, opts['blueprint'] || path.join('init', 'project-blueprint.json'));
+  const docsRoot = resolvePath(repoRoot, opts['docs-root'] || path.join('init', 'stage-a-docs'));
 
   // ========== start ==========
   if (command === 'start') {
+    const templateResults = ensureInitTemplates(docsRoot, blueprintPath, true);
+    const created = templateResults.filter((r) => r.mode === 'applied');
+    if (created.length > 0) {
+      console.log('[ok] Init templates created:');
+      for (const r of created) {
+        console.log(`  - ${path.relative(repoRoot, r.path || r.dst || '')}`);
+      }
+    } else {
+      console.log('[info] Init templates already exist');
+    }
+
     const existingState = loadState(repoRoot);
     if (existingState) {
-      console.log('[info] 检测到已存在的初始化状态');
+      console.log('[info] Existing init state detected');
       printStatus(existingState, repoRoot);
-      console.log('[info] 如需重新开始，请先删除 init/.init-state.json');
+      console.log('[info] To restart, delete init/.init-state.json first');
       process.exit(0);
     }
 
@@ -813,7 +929,7 @@ function main() {
     addHistoryEvent(state, 'init_started', 'Initialization started');
     saveState(repoRoot, state);
 
-    console.log('[ok] 初始化状态已创建: init/.init-state.json');
+    console.log('[ok] Init state created: init/.init-state.json');
     printStatus(state, repoRoot);
     process.exit(0);
   }
@@ -822,8 +938,8 @@ function main() {
   if (command === 'status') {
     const state = loadState(repoRoot);
     if (!state) {
-      console.log('[info] 未检测到初始化状态');
-      console.log('[info] 运行 "start" 命令开始初始化');
+      console.log('[info] No init state detected');
+      console.log('[info] Run "start" to begin initialization');
       process.exit(0);
     }
 
@@ -839,49 +955,49 @@ function main() {
   if (command === 'advance') {
     const state = loadState(repoRoot);
     if (!state) {
-      die('[error] 未检测到初始化状态，请先运行 "start" 命令');
+      die('[error] No init state detected. Run "start" first.');
     }
 
     const progress = getStageProgress(state);
 
     if (progress.stage === 'A') {
       if (!progress.stageA.validated) {
-        die('[error] Stage A 文档尚未验证，请先运行 check-docs');
+        die('[error] Stage A docs not validated yet. Run check-docs first.');
       }
-      console.log('\n== Stage A → B 检查点 ==\n');
-      console.log('Stage A 文档已验证通过。');
-      console.log('请确认用户已审查并批准 docs/project/ 下的需求文档。');
-      console.log('\n如果用户已确认，请运行以下命令批准并进入下一阶段：');
-      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage A');
+      console.log('\n== Stage A -> B Checkpoint ==\n');
+      console.log('Stage A docs validated.');
+      console.log('Confirm the user reviewed and approved docs under init/stage-a-docs/.');
+      console.log('\nIf confirmed, run the following to approve and advance:');
+      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage A');
       process.exit(0);
     }
 
     if (progress.stage === 'B') {
       if (!progress.stageB.validated) {
-        die('[error] Stage B 蓝图尚未验证，请先运行 validate');
+        die('[error] Stage B blueprint not validated yet. Run validate first.');
       }
-      console.log('\n== Stage B → C 检查点 ==\n');
-      console.log('Stage B 蓝图已验证通过。');
-      console.log('请确认用户已审查并批准 docs/project/project-blueprint.json。');
-      console.log('\n如果用户已确认，请运行以下命令批准并进入下一阶段：');
-      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage B');
+      console.log('\n== Stage B -> C Checkpoint ==\n');
+      console.log('Stage B blueprint validated.');
+      console.log('Confirm the user reviewed and approved init/project-blueprint.json.');
+      console.log('\nIf confirmed, run the following to approve and advance:');
+      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage B');
       process.exit(0);
     }
 
     if (progress.stage === 'C') {
       if (!progress.stageC.wrappersSynced) {
-        die('[error] Stage C 尚未完成，请先运行 apply');
+        die('[error] Stage C not complete yet. Run apply first.');
       }
-      console.log('\n== Stage C 完成检查点 ==\n');
-      console.log('脚手架和技能包已应用。');
-      console.log('请确认用户已审查初始化结果。');
-      console.log('\n如果用户已确认，请运行以下命令完成初始化：');
-      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage C');
-      console.log('\n可选：完成后运行 cleanup-init --apply --i-understand 删除 init/ 目录');
+      console.log('\n== Stage C Completion Checkpoint ==\n');
+      console.log('Scaffold and skill packs applied.');
+      console.log('Confirm the user reviewed the initialization result.');
+      console.log('\nIf confirmed, run the following to finish initialization:');
+      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage C');
+      console.log('\nOptional: run cleanup-init --apply --i-understand --archive to archive and remove init/.');
       process.exit(0);
     }
 
-    console.log('[info] 初始化已完成');
+    console.log('[info] Initialization complete');
     process.exit(0);
   }
 
@@ -889,22 +1005,22 @@ function main() {
   if (command === 'approve') {
     const stageArg = (opts['stage'] || '').toUpperCase();
     if (!['A', 'B', 'C'].includes(stageArg)) {
-      die('[error] --stage 是必需的，有效值为: A, B, C');
+      die('[error] --stage is required. Valid values: A, B, C');
     }
 
     const state = loadState(repoRoot);
     if (!state) {
-      die('[error] 未检测到初始化状态，请先运行 "start" 命令');
+      die('[error] No init state detected. Run "start" first.');
     }
 
     const progress = getStageProgress(state);
 
     if (stageArg === 'A') {
       if (progress.stage !== 'A') {
-        die(`[error] 当前阶段为 ${progress.stage}，无法批准 Stage A`);
+        die(`[error] Current stage is ${progress.stage}. Cannot approve Stage A.`);
       }
       if (!progress.stageA.validated) {
-        die('[error] Stage A 文档尚未验证，请先运行 check-docs');
+        die('[error] Stage A docs not validated yet. Run check-docs first.');
       }
       
       state.stageA.userApproved = true;
@@ -912,18 +1028,18 @@ function main() {
       addHistoryEvent(state, 'stage_a_approved', 'User approved Stage A, advancing to Stage B');
       saveState(repoRoot, state);
       
-      console.log('[ok] Stage A 已批准');
-      console.log('[ok] 已进入 Stage B - 蓝图 (Blueprint)');
-      console.log('\n下一步: 创建 docs/project/project-blueprint.json');
+      console.log('[ok] Stage A approved');
+      console.log('[ok] Advanced to Stage B - Blueprint');
+      console.log('\nNext: create init/project-blueprint.json');
       process.exit(0);
     }
 
     if (stageArg === 'B') {
       if (progress.stage !== 'B') {
-        die(`[error] 当前阶段为 ${progress.stage}，无法批准 Stage B`);
+        die(`[error] Current stage is ${progress.stage}. Cannot approve Stage B.`);
       }
       if (!progress.stageB.validated) {
-        die('[error] Stage B 蓝图尚未验证，请先运行 validate');
+        die('[error] Stage B blueprint not validated yet. Run validate first.');
       }
       
       state.stageB.userApproved = true;
@@ -931,18 +1047,18 @@ function main() {
       addHistoryEvent(state, 'stage_b_approved', 'User approved Stage B, advancing to Stage C');
       saveState(repoRoot, state);
       
-      console.log('[ok] Stage B 已批准');
-      console.log('[ok] 已进入 Stage C - 脚手架 (Scaffold)');
-      console.log('\n下一步: 运行 apply 命令创建脚手架');
+      console.log('[ok] Stage B approved');
+      console.log('[ok] Advanced to Stage C - Scaffold');
+      console.log('\nNext: run apply to create the scaffold');
       process.exit(0);
     }
 
     if (stageArg === 'C') {
       if (progress.stage !== 'C') {
-        die(`[error] 当前阶段为 ${progress.stage}，无法批准 Stage C`);
+        die(`[error] Current stage is ${progress.stage}. Cannot approve Stage C.`);
       }
       if (!progress.stageC.wrappersSynced) {
-        die('[error] Stage C 尚未完成，请先运行 apply');
+        die('[error] Stage C not complete yet. Run apply first.');
       }
       
       state.stageC.userApproved = true;
@@ -950,15 +1066,35 @@ function main() {
       addHistoryEvent(state, 'stage_c_approved', 'User approved Stage C, initialization complete');
       saveState(repoRoot, state);
       
-      console.log('[ok] Stage C 已批准');
-      console.log('[ok] 初始化已完成！');
-      console.log('\n可选: 运行 cleanup-init --apply --i-understand 删除 init/ 目录');
+      console.log('[ok] Stage C approved');
+      console.log('[ok] Initialization complete!');
+      
+      // Check whether agent_builder exists and inform the user
+      const agentDir = path.join(repoRoot, '.ai', 'skills', 'workflows', 'agent');
+      if (fs.existsSync(agentDir)) {
+        console.log('\n┌─────────────────────────────────────────────────────────┐');
+        console.log('│  ⚠️  Agent Builder Pack Detected                         │');
+        console.log('├─────────────────────────────────────────────────────────┤');
+        console.log('│  Found .ai/skills/workflows/agent.                      │');
+        console.log('│  Agent Builder is a large workflow for building agents. │');
+        console.log('│                                                         │');
+        console.log('│  If your project does not need agents, consider removing│');
+        console.log('│  it to reduce repo size and sync time.                  │');
+        console.log('│                                                         │');
+        console.log('│  Removal command:                                       │');
+        console.log('│    node init/.../init-pipeline.cjs prune-agent-builder \\');
+        console.log('│      --repo-root . --apply --i-understand              │');
+        console.log('│                                                         │');
+        console.log('│  Or keep it for future use.                             │');
+        console.log('└─────────────────────────────────────────────────────────┘');
+      }
+      
+      console.log('\nOptional: run cleanup-init --apply --i-understand --archive to archive and remove init/.');
       process.exit(0);
     }
   }
 
   if (command === 'validate') {
-    if (!blueprintPath) die('[error] --blueprint is required for validate');
     const blueprint = readJson(blueprintPath);
     const v = validateBlueprint(blueprint);
 
@@ -970,7 +1106,7 @@ function main() {
         state.stageB.validated = true;
         addHistoryEvent(state, 'stage_b_validated', 'Stage B blueprint validated');
         saveState(repoRoot, state);
-        console.log('[auto] 状态已更新: stageB.validated = true');
+        console.log('[auto] State updated: stageB.validated = true');
       }
     }
 
@@ -1009,7 +1145,7 @@ function main() {
         };
         addHistoryEvent(state, 'stage_a_validated', 'Stage A docs validated');
         saveState(repoRoot, state);
-        console.log('[auto] 状态已更新: stageA.validated = true');
+        console.log('[auto] State updated: stageA.validated = true');
       }
     }
 
@@ -1018,7 +1154,6 @@ function main() {
   }
 
   if (command === 'suggest-packs') {
-    if (!blueprintPath) die('[error] --blueprint is required for suggest-packs');
     const blueprint = readJson(blueprintPath);
 
     const v = validateBlueprint(blueprint);
@@ -1057,7 +1192,6 @@ function main() {
   }
 
   if (command === 'scaffold') {
-    if (!blueprintPath) die('[error] --blueprint is required for scaffold');
     const apply = !!opts['apply'];
     const blueprint = readJson(blueprintPath);
 
@@ -1083,14 +1217,23 @@ function main() {
   }
 
   if (command === 'apply') {
-    if (!blueprintPath) die('[error] --blueprint is required for apply');
     const providers = opts['providers'] || 'both';
     const requireStageA = !!opts['require-stage-a'];
     const skipConfigs = !!opts['skip-configs'];
+    const skipAgentBuilder = !!opts['skip-agent-builder'];
     const cleanup = !!opts['cleanup-init'];
+    const archiveAll = !!opts['archive'];
+    const archiveDocs = !!opts['archive-docs'];
+    const archiveBlueprint = !!opts['archive-blueprint'];
 
     if (cleanup && !opts['i-understand']) {
       die('[error] --cleanup-init requires --i-understand');
+    }
+    if (skipAgentBuilder && !opts['i-understand']) {
+      die('[error] --skip-agent-builder requires --i-understand');
+    }
+    if (!cleanup && (archiveAll || archiveDocs || archiveBlueprint)) {
+      console.warn('[warn] Archive flags are ignored without --cleanup-init');
     }
 
     const blueprint = readJson(blueprintPath);
@@ -1136,9 +1279,16 @@ function main() {
       for (const w of manifestResult.warnings) console.warn(`[warn] ${w}`);
     }
 
+    // Optional prune of heavy workflow skills
+    let pruneResult = null;
+    if (skipAgentBuilder) {
+      pruneResult = pruneAgentBuilder(repoRoot, true);
+      if (pruneResult.mode === 'failed') die(`[error] Failed to prune agent workflow: ${pruneResult.error}`);
+    }
+
     // Sync wrappers
     const syncResult = syncWrappers(repoRoot, providers, true);
-    if (syncResult.mode === 'failed') die(`[error] sync-skills.js failed with exit code ${syncResult.exitCode}`);
+    if (syncResult.mode === 'failed') die(`[error] sync-skills.cjs failed with exit code ${syncResult.exitCode}`);
 
     // Auto-update state
     const state = loadState(repoRoot);
@@ -1149,12 +1299,27 @@ function main() {
       state.stageC.wrappersSynced = syncResult.mode === 'applied';
       addHistoryEvent(state, 'stage_c_applied', 'Stage C apply completed');
       saveState(repoRoot, state);
-      console.log('[auto] 状态已更新: stageC.* = true');
+      console.log('[auto] State updated: stageC.* = true');
     }
 
     // Optional cleanup
+    let archiveResult = null;
     let cleanupResult = null;
     if (cleanup) {
+      const wantsArchiveDocs = archiveAll || archiveDocs;
+      const wantsArchiveBlueprint = archiveAll || archiveBlueprint;
+      if (wantsArchiveDocs || wantsArchiveBlueprint) {
+        archiveResult = archiveInitArtifacts(
+          repoRoot,
+          docsRoot,
+          blueprintPath,
+          { archiveDocs: wantsArchiveDocs, archiveBlueprint: wantsArchiveBlueprint },
+          true
+        );
+        if (archiveResult.errors.length > 0) {
+          die(`[error] Archive failed:\n- ${archiveResult.errors.join('\n- ')}`);
+        }
+      }
       cleanupResult = cleanupInit(repoRoot, true);
       if (cleanupResult.mode === 'partial') {
         console.warn(`[warn] cleanup-init partially completed: ${cleanupResult.note}`);
@@ -1170,6 +1335,8 @@ function main() {
         scaffold: scaffoldPlan,
         configs: configResults,
         manifest: manifestResult,
+        archive: archiveResult,
+        pruneAgentBuilder: pruneResult,
         sync: syncResult,
         cleanup: cleanupResult
       }, null, 2));
@@ -1180,6 +1347,8 @@ function main() {
       if (!stageARes.ok) console.log('[warn] Stage A docs check had errors; consider re-running with --require-stage-a.');
       if (stageARes.warnings.length > 0) console.log('[warn] Stage A docs check has warnings; ensure TBD/TODO items are tracked.');
       console.log(`- Manifest updated: ${path.relative(repoRoot, manifestResult.path)}`);
+      if (archiveResult) console.log(`- Archive: ${archiveResult.mode}`);
+      if (pruneResult) console.log(`- Agent workflow prune: ${pruneResult.mode}`);
       console.log(`- Wrappers synced via: ${syncResult.cmd || '(skipped)'}`);
       if (cleanupResult) console.log(`- init/ cleanup: ${cleanupResult.mode}`);
     }
@@ -1190,17 +1359,87 @@ function main() {
   if (command === 'cleanup-init') {
     if (!opts['i-understand']) die('[error] cleanup-init requires --i-understand');
     const apply = !!opts['apply'];
+    const archiveAll = !!opts['archive'];
+    const archiveDocs = !!opts['archive-docs'];
+    const archiveBlueprint = !!opts['archive-blueprint'];
+    const wantsArchiveDocs = archiveAll || archiveDocs;
+    const wantsArchiveBlueprint = archiveAll || archiveBlueprint;
+
+    let archiveResult = null;
+    if (wantsArchiveDocs || wantsArchiveBlueprint) {
+      archiveResult = archiveInitArtifacts(
+        repoRoot,
+        docsRoot,
+        blueprintPath,
+        { archiveDocs: wantsArchiveDocs, archiveBlueprint: wantsArchiveBlueprint },
+        apply
+      );
+      if (apply && archiveResult.errors.length > 0) {
+        die(`[error] Archive failed:\n- ${archiveResult.errors.join('\n- ')}`);
+      }
+    }
 
     const res = cleanupInit(repoRoot, apply);
     if (format === 'json') {
-      console.log(JSON.stringify({ ok: true, result: res }, null, 2));
+      console.log(JSON.stringify({ ok: true, archive: archiveResult, result: res }, null, 2));
     } else {
       if (!apply) {
         console.log(`[plan] ${res.op}: ${path.relative(repoRoot, res.path || '')} (${res.mode})`);
         if (res.note) console.log(`Note: ${res.note}`);
+        if (archiveResult) {
+          console.log(`[plan] archive: ${path.relative(repoRoot, archiveResult.targetRoot)} (${archiveResult.mode})`);
+        }
       } else {
         console.log(`[ok] ${res.op}: ${path.relative(repoRoot, res.path || '')} (${res.mode})`);
         if (res.note) console.log(`Note: ${res.note}`);
+        if (archiveResult) {
+          console.log(`[ok] archive: ${path.relative(repoRoot, archiveResult.targetRoot)} (${archiveResult.mode})`);
+        }
+      }
+    }
+    process.exit(0);
+  }
+
+  // ========== prune-agent-builder ==========
+  if (command === 'prune-agent-builder') {
+    if (!opts['i-understand']) die('[error] prune-agent-builder requires --i-understand');
+    const apply = !!opts['apply'];
+    const syncAfter = opts['sync-after'] !== 'false' && opts['sync-after'] !== false;
+    const providers = opts['providers'] || 'both';
+
+    const agentDir = path.join(repoRoot, '.ai', 'skills', 'workflows', 'agent');
+    
+    if (!fs.existsSync(agentDir)) {
+      if (format === 'json') {
+        console.log(JSON.stringify({ ok: true, result: { op: 'skip', path: agentDir, reason: 'not present' } }, null, 2));
+      } else {
+        console.log('[info] Agent Builder directory not found; nothing to remove');
+        console.log(`  Path: ${path.relative(repoRoot, agentDir)}`);
+      }
+      process.exit(0);
+    }
+
+    const pruneResult = pruneAgentBuilder(repoRoot, apply);
+    
+    let syncResult = null;
+    if (apply && syncAfter && pruneResult.mode === 'applied') {
+      console.log('[info] Re-syncing skill wrappers...');
+      syncResult = syncWrappers(repoRoot, providers, true);
+    }
+
+    if (format === 'json') {
+      console.log(JSON.stringify({ ok: true, prune: pruneResult, sync: syncResult }, null, 2));
+    } else {
+      if (!apply) {
+        console.log(`[plan] ${pruneResult.op}: ${path.relative(repoRoot, pruneResult.path || '')} (${pruneResult.mode})`);
+        if (syncAfter) {
+          console.log('[plan] Will re-sync wrappers after removal');
+        }
+      } else {
+        console.log(`[ok] ${pruneResult.op}: ${path.relative(repoRoot, pruneResult.path || '')} (${pruneResult.mode})`);
+        if (syncResult) {
+          console.log(`[ok] Wrappers sync: ${syncResult.mode}`);
+        }
       }
     }
     process.exit(0);

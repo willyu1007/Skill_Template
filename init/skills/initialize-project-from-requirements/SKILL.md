@@ -9,9 +9,9 @@ description: Use this only in repos that still include the init/ bootstrap kit t
 
 Turn an early project idea into **verifiable, file-based** outputs:
 
-- **Stage A (Requirements)**: four requirement documents under `docs/project/`
-- **Stage B (Blueprint)**: a machine-readable `docs/project/project-blueprint.json`
-- **Stage C (Scaffold + Skills)**: a minimal scaffold + skill pack manifest update + wrapper sync via `node .ai/scripts/sync-skills.js`
+- **Stage A (Requirements)**: four requirement documents under `init/stage-a-docs/`
+- **Stage B (Blueprint)**: a machine-readable `init/project-blueprint.json`
+- **Stage C (Scaffold + Skills)**: a minimal scaffold + skill pack manifest update + wrapper sync via `node .ai/scripts/sync-skills.cjs`
 
 This skill is designed to be **bootstrap-only**. After initialization, you may remove the `init/` kit.
 
@@ -25,15 +25,15 @@ Use this when:
 
 Do NOT use this when:
 
-- The repo has already been initialized and `docs/project/project-blueprint.json` is stable.
+- The repo has already been initialized and `init/project-blueprint.json` is stable.
 - The user is asking for implementation work unrelated to initialization.
 - You do not have permission to generate or modify repo files.
 
 ## Inputs
 
 - Repo root path (or run from repo root).
-- Stage A docs root: `docs/project/` (created from templates in `templates/`)
-- Stage B blueprint: `docs/project/project-blueprint.json`
+- Stage A docs root: `init/stage-a-docs/` (created from templates in `templates/`)
+- Stage B blueprint: `init/project-blueprint.json`
 
 Optional inputs:
 
@@ -42,18 +42,18 @@ Optional inputs:
 ## Outputs
 
 - Stage A docs (created/updated by the authoring process):
-  - `docs/project/requirements.md`
-  - `docs/project/non-functional-requirements.md`
-  - `docs/project/domain-glossary.md`
-  - `docs/project/risk-open-questions.md`
+  - `init/stage-a-docs/requirements.md`
+  - `init/stage-a-docs/non-functional-requirements.md`
+  - `init/stage-a-docs/domain-glossary.md`
+  - `init/stage-a-docs/risk-open-questions.md`
 - Stage B blueprint:
-  - `docs/project/project-blueprint.json`
+  - `init/project-blueprint.json`
 - Stage C scaffold (directories only; no framework code):
   - `src/` or (`apps/`, `packages/`) depending on `repo.layout`
 - Skills enabled (SSOT):
   - `.ai/skills/_meta/sync-manifest.json` updated (collection: `current`)
 - Provider wrappers regenerated:
-  - via `node .ai/scripts/sync-skills.js`
+  - via `node .ai/scripts/sync-skills.cjs`
 
 ## Critical Process Rules (MUST follow)
 
@@ -61,7 +61,7 @@ Optional inputs:
 
 - Before starting, check for existing `init/.init-state.json`
 - If found, resume from recorded state (ask user to confirm)
-- If not found, run `node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js start` to create initial state
+- If not found, run `node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs start` to create initial state
 - **Validation fields** (`validated`) are automatically updated by `check-docs` and `validate` commands
 - **Approval fields** (`userApproved`) and **stage transitions** are updated via `approve --stage <A|B|C>` command
 - State file will be deleted when `cleanup-init` is run
@@ -70,7 +70,7 @@ Optional inputs:
 
 - **EVERY stage transition requires explicit user approval**
 - Use prompts from `templates/stage-checkpoints.md`
-- Do NOT proceed without user saying "继续" / "approved" / "yes"
+- Do NOT proceed without user saying "continue" / "approved" / "yes"
 
 ### Rule 3: Quality Self-Review
 
@@ -83,49 +83,50 @@ Optional inputs:
 
 ### Stage A: interview → requirement docs (verifiable)
 
-1. **Initialize state**: Run `node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js start` to create `init/.init-state.json`.
+1. **Initialize state**: Run `node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs start` to create `init/.init-state.json` and seed `init/stage-a-docs/` + `init/project-blueprint.json` templates.
 2. Use `templates/conversation-prompts.md` to run a structured requirements interview.
-3. Update state as each question is answered (`stageA.mustAsk.*`).
-4. Draft the four Stage A documents using templates under `templates/`.
-5. **Self-review**: Complete Stage A checklist in `templates/quality-checklist.md`.
-6. Validate Stage A docs:
+3. Confirm whether the heavy `agent_builder` workflow is needed; if not, plan to run Stage C with `--skip-agent-builder --i-understand`.
+4. Update state as each question is answered (`stageA.mustAsk.*`).
+5. Draft the four Stage A documents using templates under `templates/`.
+6. **Self-review**: Complete Stage A checklist in `templates/quality-checklist.md`.
+7. Validate Stage A docs:
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js check-docs --docs-root docs/project
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs check-docs --docs-root init/stage-a-docs
 ```
 
 Use strict mode when you need a hard gate (CI / regulated workflows):
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js check-docs --docs-root docs/project --strict
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs check-docs --docs-root init/stage-a-docs --strict
 ```
 
-7. **CHECKPOINT A→B**: Use prompt from `templates/stage-checkpoints.md` to request user approval.
-8. Wait for explicit user approval, then run:
+8. **CHECKPOINT A→B**: Use prompt from `templates/stage-checkpoints.md` to request user approval.
+9. Wait for explicit user approval, then run:
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage A
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage A
 ```
 
 ### Stage B: requirements → blueprint (machine-readable)
 
-1. Create `docs/project/project-blueprint.json` based on the Stage A docs.
+1. Create `init/project-blueprint.json` based on the Stage A docs.
 2. Validate the blueprint:
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js validate   --blueprint docs/project/project-blueprint.json
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs validate   --blueprint init/project-blueprint.json
 ```
 
 3. Reconcile packs with capabilities (warn-only by default):
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js suggest-packs   --blueprint docs/project/project-blueprint.json   --repo-root .
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs suggest-packs   --blueprint init/project-blueprint.json   --repo-root .
 ```
 
 If you want to **add missing recommended packs** into the blueprint (safe-add only):
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js suggest-packs   --blueprint docs/project/project-blueprint.json   --repo-root .   --write
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs suggest-packs   --blueprint init/project-blueprint.json   --repo-root .   --write
 ```
 
 4. **Self-review**: Complete Stage B checklist in `templates/quality-checklist.md`.
@@ -133,7 +134,7 @@ node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js s
 6. Wait for explicit user approval, then run:
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage B
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage B
 ```
 
 ### Stage C: scaffold + enable packs + sync wrappers
@@ -141,7 +142,7 @@ node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js a
 1. Dry-run the scaffold plan:
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js scaffold   --blueprint docs/project/project-blueprint.json   --repo-root .
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs scaffold   --blueprint init/project-blueprint.json   --repo-root .
 ```
 
 2. **Handle config template coverage**:
@@ -150,13 +151,19 @@ node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js s
    - **If no template exists**: You MUST provide guidance to the user:
      - Recommend essential config files based on the selected tech stack (e.g., for Python: `requirements.txt` or `pyproject.toml`, for Java: `pom.xml` or `build.gradle`).
      - Suggest using framework-specific CLI tools (e.g., `npm init`, `poetry init`, `dotnet new`) to generate starter configs.
-     - Document the recommended config structure in `docs/project/non-functional-requirements.md` or create a brief setup guide.
+     - Document the recommended config structure in `init/stage-a-docs/non-functional-requirements.md` or create a brief setup guide.
      - Do NOT skip this step; users need clear next steps even when templates are unavailable.
 
 3. Apply scaffold + manifest update + wrapper sync:
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js apply   --blueprint docs/project/project-blueprint.json   --repo-root .   --providers codex,claude   --require-stage-a
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs apply   --blueprint init/project-blueprint.json   --repo-root .   --providers codex,claude   --require-stage-a
+```
+
+If the user opts out of `agent_builder`, add:
+
+```bash
+--skip-agent-builder --i-understand
 ```
 
 4. **Self-review**: Complete Stage C checklist in `templates/quality-checklist.md`.
@@ -164,20 +171,20 @@ node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js a
 6. Wait for explicit user approval, then run:
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js approve --stage C
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage C
 ```
 
 7. (Optional) Remove the bootstrap kit after user explicitly requests:
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js cleanup-init   --repo-root .   --apply   --i-understand
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs cleanup-init   --repo-root .   --apply   --i-understand --archive
 ```
 
 ## Boundaries
 
-- Do not invent requirements. Resolve ambiguity with the user, or record it as TBD in `docs/project/risk-open-questions.md`.
+- Do not invent requirements. Resolve ambiguity with the user, or record it as TBD in `init/stage-a-docs/risk-open-questions.md`.
 - Do not add provider-specific assumptions into Stage A docs or the blueprint.
-- Do not edit `.codex/skills/` or `.claude/skills/` directly. Only update SSOT in `.ai/skills/` and run `node .ai/scripts/sync-skills.js`. (This repo’s SSOT rule applies.) 
+- Do not edit `.codex/skills/` or `.claude/skills/` directly. Only update SSOT in `.ai/skills/` and run `node .ai/scripts/sync-skills.cjs`. (This repo’s SSOT rule applies.) 
 - Scaffolding MUST NOT overwrite existing files; it should only create missing directories and small placeholder `README.md` files.
 
 ## Included assets
@@ -199,7 +206,7 @@ node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js c
 
 ### Scripts
 
-- `scripts/init-pipeline.js` - Main pipeline script (start, status, approve, validate, check-docs, scaffold, apply, cleanup)
+- `scripts/init-pipeline.cjs` - Main pipeline script (start, status, approve, validate, check-docs, scaffold, apply, cleanup)
 - `scripts/scaffold-configs.js` - Standalone config file generator (advanced usage, see note below)
 
 **Note on config generation:**
@@ -225,4 +232,3 @@ The `apply` command generates config files by default. Use `--skip-configs` to d
 
 - `examples/quickstart.md` - Quick start guide
 - `examples/blueprint-review.md` - Blueprint review walkthrough
-

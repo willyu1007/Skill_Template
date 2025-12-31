@@ -1,48 +1,51 @@
-# Stage C - Scaffold + Skills (deterministic)
+# Stage C - Scaffold + Skills
 
 ## Goal
 
-Create a minimal scaffold and enable the right skill packs, then sync provider-native wrappers.
-
-## Inputs
-
-- Blueprint: `docs/project/project-blueprint.json`
-- Repo skill SSOT: `.ai/skills/`
-- Sync script: `.ai/scripts/sync-skills.js`
+Create a minimal scaffold and enable the right skill packs, then sync provider wrappers.
 
 ## Outputs
 
-- Minimal scaffold directories (framework-agnostic, no overwrites)
-- `.ai/skills/_meta/sync-manifest.json` updated (collection: `current`)
-- `.codex/skills/` and/or `.claude/skills/` regenerated (wrappers)
+| Output | Location |
+|--------|----------|
+| Scaffold directories | `src/` or `apps/` + `packages/` |
+| Manifest | `.ai/skills/_meta/sync-manifest.json` |
+| Provider wrappers | `.codex/skills/`, `.claude/skills/` |
 
-## Steps
+## Definition of Done
 
-1. Dry-run scaffold (required): Review what will be created.
-2. Check config template coverage:
-   - The `apply` command will auto-generate config files if a template exists for the selected `repo.language` + `repo.packageManager` combination.
-   - Available templates: `typescript-pnpm`, `go`, `cpp-xmake`, `react-native-typescript`.
-   - If no template exists, provide guidance on essential config files needed and suggest using framework-specific CLI tools.
-3. Apply scaffold + manifest update + wrapper sync.
-4. Optionally remove the `init/` kit after success.
+- [ ] Scaffold directories created (no overwrites)
+- [ ] Manifest updated with selected packs
+- [ ] Provider wrappers regenerated
+- [ ] (Optional) Agent builder pruned if not needed
 
-## Verification
-
-Dry-run scaffold:
+## Commands
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js scaffold   --blueprint docs/project/project-blueprint.json   --repo-root .
+# Dry-run scaffold
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs scaffold
+
+# Apply scaffold + manifest + wrappers
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs apply --providers both
+
+# Apply without agent_builder
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs apply --providers both --skip-agent-builder --i-understand
+
+# Approve and complete initialization
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage C
 ```
 
-Apply (writes changes):
+## Post-init options
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js apply   --blueprint docs/project/project-blueprint.json   --repo-root .   --providers both
+# Prune agent_builder after init (if decided later)
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs prune-agent-builder --apply --i-understand
+
+# Cleanup init kit (optionally archive first)
+node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs cleanup-init --apply --i-understand --archive
 ```
 
-Optional cleanup:
+## See also
 
-```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.js cleanup-init   --repo-root .   --apply   --i-understand
-```
-
+- Config templates: `init/skills/initialize-project-from-requirements/templates/scaffold-configs/`
+- Full reference: `init/reference.md`

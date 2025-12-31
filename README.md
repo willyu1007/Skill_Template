@@ -19,7 +19,7 @@ init/                      # START HERE
 
 .ai/skills/                # SSOT for skills (incl. workflows)
 .ai/scripts/               # Sync scripts
-`-- sync-skills.js          # Refresh .codex/.claude skill stubs
+`-- sync-skills.cjs          # Refresh .codex/.claude skill stubs
 
 dev/                       # Development documentation
 |-- README.md              # Dev Docs Pattern guide
@@ -34,7 +34,7 @@ dev/                       # Development documentation
 
 - Canonical skills live in `.ai/skills/`
 - `.codex/skills/` and `.claude/skills/` contain stubs that point back to SSOT
-- Refresh stubs with `node .ai/scripts/sync-skills.js --scope current --providers both`
+- Refresh stubs with `node .ai/scripts/sync-skills.cjs --scope current --providers both`
 
 ## Documentation
 
