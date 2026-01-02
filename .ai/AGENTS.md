@@ -1,17 +1,20 @@
 # `.ai/` (LLM-facing)
 
 ## Purpose
+
 `.ai/` stores **LLM-facing** assets for repo governance:
 - Skills (SSOT)
 - Maintenance scripts (lint/sync/checks)
 - LLM engineering governance entry points
 
 ## Non-negotiables
+
 - **SSOT**: edit skills only under `.ai/skills/`.
 - **Generated stubs**: do not edit `.codex/skills/` or `.claude/skills/` directly. Regenerate via sync.
-- **Progressive disclosure**: do not recursively enumerate `.ai/` to “discover” content.
+- **Progressive disclosure**: do not recursively enumerate `.ai/` to "discover" content.
 
 ## Routing
+
 - If the task is **LLM engineering** (provider integration, calling wrappers, profiles, prompts, cost/telemetry, credentials/config keys):
   - Open: `.ai/llm/AGENTS.md`
   - Invoke workflow skill: `llm_engineering`
@@ -22,6 +25,7 @@
     - `node .ai/scripts/sync-skills.cjs --scope current --providers both --mode reset`
 
 ## Context loading rules (token-efficient)
+
 AI/LLM MUST:
 - Read only the **single** file it is routed to.
 - Open additional files only when an already-opened doc provides an explicit path.
@@ -30,6 +34,8 @@ AI/LLM MUST NOT:
 - Run recursive listing/grep over `.ai/` (e.g., `tree .ai`, `rg --files .ai`).
 
 ## Verification (repo maintenance)
+
 - Lint skills: `node .ai/scripts/lint-skills.cjs --strict`
 - Sync stubs: `node .ai/scripts/sync-skills.cjs --scope current --providers both --mode reset`
-- LLM config key gate: `node .ai/scripts/check-llm-config-keys.cjs`
+- LLM config key gate: `node .ai/skills/workflows/llm/llm_engineering/scripts/check-llm-config-keys.cjs`
+- LLM registry sanity: `node .ai/skills/workflows/llm/llm_engineering/scripts/validate-llm-registry.cjs`
