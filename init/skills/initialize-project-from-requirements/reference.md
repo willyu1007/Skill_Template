@@ -101,12 +101,9 @@ This init script uses the following conceptual mapping:
 
 | Capability / intent | Suggested pack |
 |---|---|
-| always | `workflows` |
+| always | `workflows`, `standards` |
 | backend enabled | `backend` |
 | frontend enabled | `frontend` |
-| database enabled | `data` |
-| BPMN enabled | `diagrams` |
-| CI / containerize | `ops` |
 
 The script emits warnings when:
 

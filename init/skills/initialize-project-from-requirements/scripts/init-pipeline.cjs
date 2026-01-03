@@ -465,17 +465,14 @@ function generateConfigFiles(repoRoot, blueprint, apply) {
 function packPrefixMap() {
   return {
     workflows: 'workflows/',
+    standards: 'standards/',
     backend: 'backend/',
-    frontend: 'frontend/',
-    data: 'data/',
-    diagrams: 'diagrams/',
-    ops: 'ops/',
-    scaffold: 'scaffold/'
+    frontend: 'frontend/'
   };
 }
 
 function packOrder() {
-  return ['workflows', 'backend', 'frontend', 'data', 'diagrams', 'ops', 'scaffold'];
+  return ['workflows', 'standards', 'backend', 'frontend'];
 }
 
 function normalizePackList(packs) {
@@ -534,23 +531,18 @@ function validateBlueprint(blueprint) {
 
   const packs = normalizePackList(skills.packs || []);
   if (!packs.includes('workflows')) warnings.push('skills.packs does not include "workflows". This is usually required.');
+  if (!packs.includes('standards')) warnings.push('skills.packs does not include "standards". This is usually recommended.');
 
   const ok = errors.length === 0;
   return { ok, errors, warnings, packs };
 }
 
 function recommendedPacksFromBlueprint(blueprint) {
-  const rec = new Set(['workflows']);
+  const rec = new Set(['workflows', 'standards']);
   const caps = blueprint.capabilities || {};
-  const q = blueprint.quality || {};
 
   if (caps.backend && caps.backend.enabled) rec.add('backend');
   if (caps.frontend && caps.frontend.enabled) rec.add('frontend');
-
-  if (caps.database && caps.database.enabled) rec.add('data');
-  if (caps.bpmn && caps.bpmn.enabled) rec.add('diagrams');
-
-  if ((q.ci && q.ci.enabled) || (q.devops && q.devops.containerize)) rec.add('ops');
 
   // Optional packs can be added explicitly via blueprint.skills.packs.
 
@@ -650,6 +642,130 @@ function writeFileIfMissing(filePath, content, apply) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, 'utf8');
   return { op: 'write', path: filePath, mode: 'applied' };
+}
+
+/**
+ * Generates a project-specific README.md from the blueprint.
+ * Replaces the template README with project information.
+ */
+function generateProjectReadme(repoRoot, blueprint, apply) {
+  const readmePath = path.join(repoRoot, 'README.md');
+  const templatePath = path.join(__dirname, 'templates', 'README.template.md');
+  
+  if (!fs.existsSync(templatePath)) {
+    return { op: 'skip', path: readmePath, reason: 'template not found' };
+  }
+  
+  let template = fs.readFileSync(templatePath, 'utf8');
+  
+  const project = blueprint.project || {};
+  const repo = blueprint.repo || {};
+  const caps = blueprint.capabilities || {};
+  
+  // Simple mustache-like replacement
+  function replace(key, value) {
+    template = template.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value || '');
+  }
+  
+  function conditionalBlock(key, value, show) {
+    const regex = new RegExp(`\\{\\{#${key}\\}\\}([\\s\\S]*?)\\{\\{/${key}\\}\\}`, 'g');
+    if (show && value) {
+      template = template.replace(regex, (_, content) => content.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value));
+    } else {
+      template = template.replace(regex, '');
+    }
+  }
+  
+  // Basic replacements
+  replace('PROJECT_NAME', project.name || 'my-project');
+  replace('PROJECT_DESCRIPTION', project.description || 'Project description');
+  replace('LANGUAGE', repo.language || 'typescript');
+  replace('PACKAGE_MANAGER', repo.packageManager || 'pnpm');
+  replace('REPO_LAYOUT', repo.layout || 'single');
+  
+  // Conditional blocks
+  conditionalBlock('DOMAIN', project.domain, !!project.domain);
+  conditionalBlock('FRONTEND_FRAMEWORK', caps.frontend?.framework, caps.frontend?.enabled);
+  conditionalBlock('BACKEND_FRAMEWORK', caps.backend?.framework, caps.backend?.enabled);
+  conditionalBlock('DATABASE_KIND', caps.database?.kind, caps.database?.enabled);
+  conditionalBlock('API_STYLE', caps.api?.style, !!caps.api?.style);
+  
+  // Language-specific blocks
+  const isNode = ['typescript', 'javascript'].includes(repo.language);
+  const isPython = repo.language === 'python';
+  const isGo = repo.language === 'go';
+  
+  conditionalBlock('IS_NODE', 'true', isNode);
+  conditionalBlock('IS_PYTHON', 'true', isPython);
+  conditionalBlock('IS_GO', 'true', isGo);
+  
+  // Install and dev commands based on package manager
+  const installCommands = {
+    pnpm: 'pnpm install',
+    npm: 'npm install',
+    yarn: 'yarn',
+    pip: 'pip install -r requirements.txt',
+    poetry: 'poetry install',
+    go: 'go mod download'
+  };
+  
+  const devCommands = {
+    pnpm: 'pnpm dev',
+    npm: 'npm run dev',
+    yarn: 'yarn dev',
+    pip: 'python main.py',
+    poetry: 'poetry run python main.py',
+    go: 'go run .'
+  };
+  
+  const testCommands = {
+    pnpm: 'pnpm test',
+    npm: 'npm test',
+    yarn: 'yarn test',
+    pip: 'pytest',
+    poetry: 'poetry run pytest',
+    go: 'go test ./...'
+  };
+  
+  const pm = repo.packageManager || 'pnpm';
+  replace('INSTALL_COMMAND', installCommands[pm] || installCommands.pnpm);
+  replace('DEV_COMMAND', devCommands[pm] || devCommands.pnpm);
+  replace('TEST_COMMAND', testCommands[pm] || testCommands.pnpm);
+  
+  // Project structure based on layout
+  let structure;
+  if (repo.layout === 'monorepo') {
+    structure = `├── apps/
+│   ├── frontend/       # Frontend application
+│   └── backend/        # Backend services
+├── packages/
+│   └── shared/         # Shared libraries
+├── .ai/skills/         # AI skills (SSOT)
+├── docs/               # Documentation
+└── ops/                # DevOps configuration`;
+  } else {
+    structure = `├── src/
+│   ├── frontend/       # Frontend code
+│   └── backend/        # Backend code
+├── .ai/skills/         # AI skills (SSOT)
+├── docs/               # Documentation
+└── ops/                # DevOps configuration`;
+  }
+  replace('PROJECT_STRUCTURE', structure);
+  
+  // Clean up any remaining empty conditional blocks
+  template = template.replace(/\{\{#\w+\}\}[\s\S]*?\{\{\/\w+\}\}/g, '');
+  template = template.replace(/\{\{\w+\}\}/g, '');
+  
+  // Clean up multiple empty lines
+  template = template.replace(/\n{3,}/g, '\n\n');
+  
+  if (!apply) {
+    return { op: 'write', path: readmePath, mode: 'dry-run' };
+  }
+  
+  fs.writeFileSync(readmePath, template, 'utf8');
+  return { op: 'write', path: readmePath, mode: 'applied' };
 }
 
 function ensureInitTemplates(docsRoot, blueprintPath, apply) {
@@ -1273,6 +1389,14 @@ function main() {
       }
     }
 
+    // Generate project-specific README.md
+    const readmeResult = generateProjectReadme(repoRoot, blueprint, true);
+    if (readmeResult.op === 'write' && readmeResult.mode === 'applied') {
+      console.log('[ok] README.md generated from blueprint.');
+    } else if (readmeResult.reason) {
+      console.log(`[info] README.md: ${readmeResult.reason}`);
+    }
+
     // Manifest update
     const manifestResult = updateManifest(repoRoot, blueprint, true);
     if (manifestResult.warnings && manifestResult.warnings.length > 0) {
@@ -1334,6 +1458,7 @@ function main() {
         stageA: stageARes,
         scaffold: scaffoldPlan,
         configs: configResults,
+        readme: readmeResult,
         manifest: manifestResult,
         archive: archiveResult,
         pruneAgentBuilder: pruneResult,
