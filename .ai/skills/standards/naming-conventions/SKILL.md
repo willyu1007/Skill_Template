@@ -14,7 +14,7 @@ Define naming conventions for directories, files, and identifiers with these goa
 
 ## When to use
 
-Use this skill when:
+Use the naming-conventions skill when:
 - Creating new directories or files
 - Naming skills, workflows, or commands
 - Reviewing code for naming consistency
@@ -41,10 +41,10 @@ Use this skill when:
 
 ## Script Integration (MUST)
 
-Scripts that generate files MUST follow the naming conventions defined in this skill.
+Scripts that generate files MUST follow the naming conventions defined in the naming-conventions skill.
 
 **Requirements:**
-- Declare reference to this skill in script header comments
+- Declare a reference to the naming-conventions skill in script header comments
 - Generated file/directory names MUST use kebab-case
 - Validate output names against convention rules before writing
 
@@ -56,7 +56,7 @@ Scripts that generate files MUST follow the naming conventions defined in this s
 ```
 
 **Implementation guidance:**
-- Import or read this skill path when generating output paths
+- Import or read the naming-conventions skill path when generating output paths
 - Scripts under `.ai/scripts/` should programmatically validate generated names
 - When scaffolding projects, apply kebab-case to all generated directories/files
 

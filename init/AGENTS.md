@@ -148,3 +148,53 @@ Acceptance criteria:
 - Stage A passes `check-docs` (strict if required).
 - Stage B blueprint validates.
 - Stage C wrappers regenerated and match selected packs.
+
+---
+
+## Post-init: Update Root AGENTS.md
+
+After Stage C completes, ask the user if they want to update the root `AGENTS.md` with project-specific info.
+
+### When to ask
+
+At Stage C completion checkpoint, present option: "update agents" to record tech stack in root AGENTS.md.
+
+### What to preserve
+
+The root `AGENTS.md` contains template repo structure that MUST be kept:
+
+| Section | Keep? | Reason |
+|---------|-------|--------|
+| Key Directories table | YES | LLM navigation |
+| Routing table | YES | Task dispatch |
+| Global Rules | YES | Cross-cutting constraints |
+| `.ai/` reference | YES | SSOT location |
+| `dev-docs/` reference | YES | Complex task pattern |
+
+### What to add
+
+From `init/project-blueprint.json`:
+
+| Add | Source field | Example |
+|-----|--------------|---------|
+| Project Type | `project.name`, `project.description` | "my-app - E-commerce platform" |
+| Tech Stack table | `repo.language`, `repo.packageManager`, `repo.layout`, frameworks | TypeScript, pnpm, monorepo, React, Express |
+| Project directories | derived from `repo.layout` + enabled capabilities | `apps/frontend/`, `apps/backend/`, `src/` |
+
+**Note**: Do NOT create a separate `## Capabilities` section. Express capability info through Tech Stack rows (e.g., Frontend: React, Backend: Express, Database: PostgreSQL) and Key Directories entries.
+
+### How to update
+
+1. Read current root `AGENTS.md`
+2. Update existing `## Project Type` section if present; otherwise insert after title
+3. Update existing `## Tech Stack` section if present; otherwise insert after Project Type
+4. Update "Key Directories" table with project paths (add project-specific entries)
+5. Preserve all other sections unchanged (including `## Need More?`, routing, global rules, etc.)
+6. Show diff to user before writing
+
+### Format rules
+
+- One fact per line (semantic density)
+- Use tables for structured data (tech stack, directories)
+- Prefer short terms in tables ("TS" over "TypeScript" is acceptable)
+- No redundant prose; headers provide context

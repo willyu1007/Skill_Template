@@ -117,7 +117,7 @@ If you need changes, tell me what to adjust.
 ### When to Trigger
 
 After ALL of these conditions are met:
-1. `scaffold --apply` has completed
+1. `apply` command has completed (scaffold + configs + manifest + wrappers)
 2. Manifest updated
 3. Wrappers synced
 4. AI has completed the quality checklist self-review
@@ -146,20 +146,32 @@ Initialization is complete.
 
 ### Next steps
 
-1. Archive docs (optional): to keep Stage A docs and blueprint in `docs/project/`, run:
+1. **Update AGENTS.md (recommended)**: Record project type and tech stack in root `AGENTS.md`
+2. Archive docs (optional): to keep Stage A docs and blueprint in `docs/project/`, run:
    node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs cleanup-init --repo-root . --apply --i-understand --archive
-2. Cleanup init (optional): removes the initialization kit after archiving
-3. Start development: you can now use the enabled skills
+3. Cleanup init (optional): removes the initialization kit after archiving
+4. Start development: you can now use the enabled skills
 
 ### Confirm completion
 
-If you confirm initialization is complete, reply "done".
-If you want to clean up init, reply "cleanup init".
+Reply with one of:
+- "update agents" - I will help you update the root AGENTS.md with project info
+- "cleanup init" - Archive docs and remove the init kit
+- "done" - Complete initialization without further changes
 ```
 
 ### AI MUST
 
 - Wait for explicit user confirmation
+- If user says "update agents":
+  1. Read current root `AGENTS.md`
+  2. Preserve template repo structure (Key Directories table, Routing table, Global Rules)
+  3. Add project-specific info from blueprint:
+     - Project Type section (name + one-line description)
+     - Tech Stack table (language, package manager, layout, frameworks)
+     - Update Key Directories with project-specific paths
+  4. Follow LLM-friendly doc rules: moderate semantic density, structured tables, token-efficient
+  5. Show diff to user before applying
 - Once user confirms, run:
   ```bash
   node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage C

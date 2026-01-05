@@ -670,7 +670,7 @@ function writeFileIfMissing(filePath, content, apply) {
  */
 function generateProjectReadme(repoRoot, blueprint, apply) {
   const readmePath = path.join(repoRoot, 'README.md');
-  const templatePath = path.join(__dirname, 'templates', 'README.template.md');
+  const templatePath = path.join(TEMPLATES_DIR, 'README.template.md');
   
   if (!fs.existsSync(templatePath)) {
     return { op: 'skip', path: readmePath, reason: 'template not found' };

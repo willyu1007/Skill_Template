@@ -82,13 +82,13 @@ Use the code-review-standards skill when:
 
 ### Be Specific
 
-- ❌ "This is confusing"
+- ❌ "The comment is confusing"
 - ✅ "The variable name `x` doesn't convey its purpose. Consider `userCount` or `activeUsers`"
 
 ### Be Constructive
 
-- ❌ "This is wrong"
-- ✅ "This approach may cause issues when X happens. Consider using Y pattern instead"
+- ❌ "The change is wrong"
+- ✅ "The approach may cause issues when X happens. Consider using Y pattern instead"
 
 ### Distinguish Severity
 

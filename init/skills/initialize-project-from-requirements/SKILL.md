@@ -167,14 +167,15 @@ If the user opts out of `agent_builder`, add:
 ```
 
 4. **Self-review**: Complete Stage C checklist in `templates/quality-checklist.md`.
-5. **CHECKPOINT C Complete**: Use prompt from `templates/stage-checkpoints.md` to confirm completion.
-6. Wait for explicit user approval, then run:
+5. **CHECKPOINT C Complete**: Use prompt from `templates/stage-checkpoints.md` to confirm completion. User will choose one of: "update agents", "cleanup init", or "done".
+6. **(Recommended) Update root AGENTS.md**: If user replies "update agents", update the root `AGENTS.md` with project-specific info **before** running approve. See **Post-init: Update AGENTS.md** section below for rules.
+7. **Approve Stage C**: After handling user's choice (update agents if selected), run:
 
 ```bash
 node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage C
 ```
 
-7. (Optional) Remove the bootstrap kit after user explicitly requests:
+8. (Optional) Remove the bootstrap kit if user chose "cleanup init" or explicitly requests later:
 
 ```bash
 node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs cleanup-init   --repo-root .   --apply   --i-understand --archive
@@ -182,10 +183,89 @@ node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs 
 
 ## Boundaries
 
-- Do not invent requirements. Resolve ambiguity with the user, or record it as TBD in `init/stage-a-docs/risk-open-questions.md`.
+- Do not invent requirements. Resolve ambiguity with the user, or record the item as TBD in `init/stage-a-docs/risk-open-questions.md`.
 - Do not add provider-specific assumptions into Stage A docs or the blueprint.
 - Do not edit `.codex/skills/` or `.claude/skills/` directly. Only update SSOT in `.ai/skills/` and run `node .ai/scripts/sync-skills.cjs`. (The repo's SSOT rule applies.) 
-- Scaffolding MUST NOT overwrite existing files; it should only create missing directories and small placeholder `README.md` files.
+- Scaffolding MUST NOT overwrite existing files; scaffolding should only create missing directories and small placeholder `README.md` files.
+- **Exception**: The root `README.md` will be replaced with a project-specific version generated from the blueprint. This is intentional—the template README should be replaced with project documentation.
+
+---
+
+## Post-init: Update AGENTS.md
+
+After Stage C completion, if the user chooses to update the root `AGENTS.md`, follow these rules.
+
+### MUST Preserve (template repo structure)
+
+| Section | Reason |
+|---------|--------|
+| Key Directories table | Core navigation for LLM |
+| Routing table | Task-type dispatch |
+| Global Rules | Cross-cutting constraints |
+| `.ai/` reference | SSOT skills location |
+| `dev-docs/` reference | Complex task docs pattern |
+| `## Need More?` | Navigation to detailed docs |
+| Any other unlisted sections | Default: preserve unchanged |
+
+**Modification boundary**: You are ONLY allowed to add/update: `## Project Type`, `## Tech Stack`, and entries in the `## Key Directories` table. All other content MUST remain unchanged.
+
+### MUST Add/Update (project-specific info)
+
+| Section | Source | Format |
+|---------|--------|--------|
+| Project Type | `project.name` + `project.description` | One-line summary |
+| Tech Stack | `repo.language`, `repo.packageManager`, `repo.layout`, frameworks | Table |
+| Key Directories | `repo.layout` + enabled capabilities | Update existing table |
+
+**Note**: Do NOT create a separate `## Capabilities` section. Express capability info through Tech Stack rows (e.g., Frontend: React, Backend: Express, Database: PostgreSQL) and Key Directories entries (e.g., `apps/frontend/`, `apps/backend/`).
+
+**Update logic**: If a section already exists (e.g., `## Project Type`), update its content. If the section does not exist, insert the section in the appropriate location. Do NOT create duplicate sections.
+
+### Format Rules (LLM-friendly docs)
+
+1. **Semantic density**: One key fact per line; avoid filler text
+2. **Structured data**: Use tables for tech stack and directory mappings
+3. **Token efficiency**: Prefer abbreviations in tables (e.g., "TS" for TypeScript)
+4. **Scannable**: Keep sections short; use headers for navigation
+
+### Example: Updated AGENTS.md structure
+
+```markdown
+# AI Assistant Instructions
+
+## Project Type
+
+{{project.name}} - {{project.description}}
+
+## Tech Stack
+
+| Category | Value |
+|----------|-------|
+| Language | {{repo.language}} |
+| Package Manager | {{repo.packageManager}} |
+| Layout | {{repo.layout}} |
+| Frontend | {{capabilities.frontend.framework}} |
+| Backend | {{capabilities.backend.framework}} |
+| Database | {{capabilities.database.kind}} |
+
+## Key Directories
+
+| Directory | Purpose |
+|-----------|---------|
+| `src/` or `apps/` | Application code |
+| `apps/frontend/` | Frontend application (if enabled) |
+| `apps/backend/` | Backend services (if enabled) |
+| `.ai/` | Skills, scripts, LLM governance |
+| `dev-docs/` | Working documentation |
+
+## Routing
+
+[preserve original routing table]
+
+## Global Rules
+
+[preserve original global rules]
+```
 
 ## Included assets
 
