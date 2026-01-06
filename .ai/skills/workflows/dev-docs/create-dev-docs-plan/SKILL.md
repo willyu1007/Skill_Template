@@ -1,6 +1,6 @@
 ---
 name: create-dev-docs-plan
-description: Create a structured dev-docs task bundle (overview/plan/architecture/notes/verification/pitfalls) with clear scope, acceptance criteria, and handoff-ready artifacts.
+description: Create a structured dev-docs task bundle (overview/plan/architecture/notes/verification/pitfalls) with clear scope, acceptance criteria, and handoff-ready artifacts; triggers: task docs/dev-docs/handoff/context recovery.
 ---
 
 # Create Dev Docs Plan
@@ -10,10 +10,20 @@ Generate a structured, repeatable “task documentation bundle” so implementat
 
 ## When to use
 Use this skill when:
-- Starting a non-trivial task or project
-- Work spans multiple modules/services
-- You need a shared plan for multiple contributors
-- You want a consistent handoff artifact for later context recovery
+- Starting a non-trivial task or project (非一次性小改动)
+- Work spans multiple modules/services (多模块/多服务)
+- You need a shared plan for multiple contributors (协作/交接)
+- You want a consistent handoff artifact for later context recovery (上下文恢复/归档)
+
+## Quick decision gate (MUST)
+Use this skill when **any** is true:
+- Expected duration is `> 2 hours`, or likely to span multiple sessions
+- Scope touches `>= 2` modules/directories, or requires `>= 3` sequential steps with verification
+- You need explicit handoff/context recovery documentation
+
+Skip this skill when **all** are true:
+- Single-file change
+- Trivial fix (`< 30 min`)
 
 ## Inputs
 - Task name (short, kebab-case recommended)
@@ -44,11 +54,13 @@ dev-docs/active/<task-slug>/
 - Verification MUST be concrete (commands/checks, expected results).
 - The task bundle MUST include `05-pitfalls.md` and it MUST be updated when failures are resolved (historical lessons, append-only).
 - Avoid embedding secrets or real credentials.
+- For tasks that meet the Decision Gate, the bundle MUST be created before implementation work begins (before code/config changes).
 
 ## Steps
 1. Create `dev-docs/active/<task-slug>/`.
 2. Write `00-overview.md`:
    - problem statement
+   - status (`planned | in-progress | blocked | done`) + next concrete step
    - goal
    - non-goals
    - high-level acceptance criteria

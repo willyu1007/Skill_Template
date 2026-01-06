@@ -1,6 +1,6 @@
 ---
 name: update-dev-docs-for-handoff
-description: Update an existing dev-docs task bundle with progress, decisions, pitfalls, and verification evidence to enable clean handoff, context recovery, or archival.
+description: Update an existing dev-docs task bundle with progress, decisions, pitfalls, and verification evidence to enable clean handoff, context recovery, or archival; triggers: handoff/update task docs/context reset/archive.
 ---
 
 # Update Dev Docs for Handoff
@@ -15,6 +15,8 @@ Use this skill when:
 - You are about to compress context or close a long-running thread
 - A refactor changed the plan and decisions must be recorded
 - A task is completed and ready to archive
+
+If no task bundle exists yet, use `create-dev-docs-plan` first.
 
 ## Inputs
 - Task directory (e.g., `dev-docs/active/<task-slug>/`)

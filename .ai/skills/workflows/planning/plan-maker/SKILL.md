@@ -1,6 +1,6 @@
 ---
 name: plan-maker
-description: Create a goal-aligned macro-level roadmap (dev-docs/active/<task>/roadmap.md) by asking clarifying questions when needed; planning only (no code changes).
+description: Create a goal-aligned macro-level roadmap (dev-docs/active/<task>/roadmap.md) by asking clarifying questions when needed; planning only (no code changes); triggers: plan/roadmap/milestones/implementation plan.
 ---
 
 # Plan Maker
@@ -10,12 +10,12 @@ Produce a single, goal-aligned macro-level roadmap as a Markdown document that c
 
 ## When to use
 Use the plan-maker skill when:
-- The user asks for a plan, roadmap, milestones, or an implementation plan before coding
+- The user asks for a plan/roadmap/milestones/implementation plan (规划/方案/路线图/里程碑/实施计划) before coding
 - The task is large/ambiguous and benefits from staged execution and verification
 - You need a roadmap artifact saved under `dev-docs/active/` for collaboration and handoff
 
 Avoid the skill when:
-- The user explicitly wants you to implement changes immediately (plan-maker is planning-only)
+- The change is trivial (<30 min) and does not benefit from staged execution/verification
 - A roadmap already exists and only minor edits are needed (update the existing roadmap instead)
 
 ## Inputs
@@ -55,6 +55,8 @@ Avoid the skill when:
 - MUST NOT modify application/source code, project configuration, or database state
 - MUST ask clarifying questions when the goal or constraints are ambiguous
 - MUST NOT invent project-specific facts (APIs, file paths, schemas) without evidence
+- If the user asks to implement immediately but the task is non-trivial, produce the roadmap first, then ask for confirmation to proceed with execution in a follow-up turn.
+- If the task meets the dev-docs Decision Gate, `roadmap.md` SHOULD be treated as an input to `create-dev-docs-plan` (the roadmap is not a substitute for the full bundle).
 - SHOULD keep the roadmap macro-level; deep design details belong in separate documentation artifacts
 - SHOULD NOT include secrets (credentials, tokens, private keys) in the roadmap
 - PRODUCES macro-level roadmaps: milestones, phases, scope, impact, risks, rollback strategy

@@ -27,9 +27,12 @@ Template repository. Users clone this to start new AI-friendly projects.
 
 - For complex tasks (multi-module, multi-session, >2 hours), create task docs under `dev-docs/active/`
 - On context reset for ongoing work, read `dev-docs/active/<task-slug>/00-overview.md` first
-- Follow progressive disclosure pattern
+- Always edit `.ai/skills/` (SSOT), never edit `.codex/` or `.claude/` directly
+- Follow progressive disclosure: read only the file you are routed to
 
-## Need More?
+## Coding Workflow (MUST)
 
-- **Skill/Workflow operations**: See `.ai/AGENTS.md`
-- **LLM engineering tasks**: See `.ai/llm-config/AGENTS.md`
+- Before modifying code/config for a non-trivial task, apply the Decision Gate in `dev-docs/AGENTS.md` and create/update the dev-docs task bundle as required.
+- If the user asks for planning artifacts (plan/roadmap/milestones/implementation plan) before coding, use `plan-maker` first, then ask for confirmation to proceed with implementation.
+- If the task needs context preservation (multi-session, handoff) or qualifies as complex, follow `dev-docs/AGENTS.md` and use dev-docs workflows (`create-dev-docs-plan`, `update-dev-docs-for-handoff`).
+

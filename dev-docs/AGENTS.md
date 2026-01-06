@@ -11,6 +11,26 @@ Persistent task documentation for context preservation across sessions.
 | Task paused or handed off | Update docs via `update-dev-docs-for-handoff` |
 | Task completed and verified | Archive via `update-dev-docs-for-handoff` with status=done |
 
+## Decision Gate (MUST)
+
+Create a dev-docs task bundle under `dev-docs/active/<task-slug>/` when **any** is true:
+- Expected duration is `> 2 hours`, or likely to span multiple sessions
+- Scope touches `>= 2` modules/directories, or requires `>= 3` sequential steps with verification
+- The user explicitly needs handoff/context recovery artifacts (交接/上下文恢复/归档)
+
+If the user asks for a roadmap/plan before coding (规划/方案/路线图/里程碑/实施计划), use `plan-maker` first to create `roadmap.md`, then use `create-dev-docs-plan` to create the full bundle when the task meets the criteria above.
+
+## Coding Gate (MUST)
+
+Before making any code/config changes for a task that meets the Decision Gate:
+1. Ensure the task bundle exists under `dev-docs/active/<task-slug>/` (create via `create-dev-docs-plan` if missing).
+2. If the work is ambiguous, or the user asked for a plan/roadmap, create `roadmap.md` via `plan-maker` before implementation.
+3. During implementation, keep the bundle current:
+   - update `00-overview.md` when status changes
+   - append to `03-implementation-notes.md` after milestones
+   - record every verification run in `04-verification.md` (commands + outcomes)
+4. Before pausing, handing off, or finishing, run `update-dev-docs-for-handoff`.
+
 ## Directory Structure
 
 ```
@@ -74,4 +94,3 @@ Do NOT create dev docs for:
 - Single-file changes
 - Trivial fixes (<30 min)
 - Simple refactors with clear scope
-
