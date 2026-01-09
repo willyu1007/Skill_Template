@@ -1,0 +1,15 @@
+{
+  "id": "bundle-test-ci-gitlab-ci",
+  "version": "1.0.0",
+  "description": "GitLab CI bundle: enable test jobs, artifacts/reporting, and troubleshooting.",
+  "includePrefixes": [
+    "testing/test-ci-gitlab-ci/"
+  ],
+  "dependencies": [],
+  "scripts": {},
+  "metadata": {
+    "author": "routing-dispatch-meta-skill",
+    "tags": ["ci", "gitlab-ci", "testing", "bundle"],
+    "mutuallyExclusive": ["bundle-test-ci-github-actions"]
+  }
+}

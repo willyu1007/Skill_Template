@@ -1,0 +1,15 @@
+{
+  "id": "bundle-test-ci-github-actions",
+  "version": "1.0.0",
+  "description": "GitHub Actions CI bundle: enable test jobs, artifacts/reporting, and troubleshooting.",
+  "includePrefixes": [
+    "testing/test-ci-github-actions/"
+  ],
+  "dependencies": [],
+  "scripts": {},
+  "metadata": {
+    "author": "routing-dispatch-meta-skill",
+    "tags": ["ci", "github-actions", "testing", "bundle"],
+    "mutuallyExclusive": ["bundle-test-ci-gitlab-ci"]
+  }
+}

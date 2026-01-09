@@ -132,6 +132,15 @@ Self-review checklist:
 - Do NOT use vague terms like "it", "this", "above" without explicit references
 - Do NOT mix multiple intents in a single paragraph
 
+## Iterative co-authoring loop (borrowed)
+
+For substantial docs/specs, prefer an explicit loop:
+
+1. **Context gathering**: ask targeted questions to close gaps.
+2. **Structure first**: create section headers with placeholders.
+3. **Draft section-by-section** with review feedback.
+4. **Reader testing**: validate that a fresh reader (or fresh agent) can answer the obvious questions without extra context.
+
 ## Included assets
 
 None.

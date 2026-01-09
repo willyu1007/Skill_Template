@@ -1,0 +1,15 @@
+{
+  "id": "bundle-test-web-cypress",
+  "version": "1.0.0",
+  "description": "Cypress E2E testing bundle: bootstrap, author specs, run/debug, and triage failures.",
+  "includePrefixes": [
+    "testing/test-web-cypress/"
+  ],
+  "dependencies": [],
+  "scripts": {},
+  "metadata": {
+    "author": "routing-dispatch-meta-skill",
+    "tags": ["testing", "cypress", "e2e", "web", "bundle"],
+    "mutuallyExclusive": ["bundle-test-web-playwright"]
+  }
+}

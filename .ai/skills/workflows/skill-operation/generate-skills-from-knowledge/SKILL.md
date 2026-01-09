@@ -49,6 +49,10 @@ The expected outputs are:
   - known limitations / follow-ups
 - A lint report (stdout) from `python ./scripts/skillgen.py lint ...` (recommended)
 
+## Command working directory
+All relative paths in commands (for example `./scripts/skillgen.py` and `./templates/...`) are relative to:
+- `.ai/skills/workflows/skill-operation/generate-skills-from-knowledge/`
+
 ## Steps
 ### Scenario A: Convert docs into a skills bundle (recommended default)
 1. **Inventory** the source docs (file list) and decide what is IN/OUT of scope.

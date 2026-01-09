@@ -1,9 +1,18 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Init State",
-  "description": "Tracks the progress of the 3-stage initialization conversation",
+  "description": "Tracks the progress of the 3-stage initialization workflow.",
   "type": "object",
-  "required": ["version", "stage", "stage-a"],
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "stage",
+    "createdAt",
+    "stage-a",
+    "stage-b",
+    "stage-c",
+    "history"
+  ],
   "properties": {
     "version": {
       "type": "integer",
@@ -14,13 +23,30 @@
       "enum": ["A", "B", "C", "complete"],
       "description": "Current stage of initialization"
     },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "State file creation time (ISO 8601)"
+    },
     "stage-a": {
       "type": "object",
       "description": "Stage A: Requirements interview progress",
+      "additionalProperties": false,
+      "required": ["mustAsk", "docsWritten", "validated", "userApproved"],
       "properties": {
         "mustAsk": {
           "type": "object",
-          "description": "MUST-ask questions (all required before Stage A completion)",
+          "description": "MUST-ask question tracking (optional to keep up to date manually).",
+          "additionalProperties": false,
+          "required": [
+            "onePurpose",
+            "userRoles",
+            "mustRequirements",
+            "outOfScope",
+            "userJourneys",
+            "constraints",
+            "successMetrics"
+          ],
           "properties": {
             "onePurpose": { "$ref": "#/$defs/questionState" },
             "userRoles": { "$ref": "#/$defs/questionState" },
@@ -29,22 +55,13 @@
             "userJourneys": { "$ref": "#/$defs/questionState" },
             "constraints": { "$ref": "#/$defs/questionState" },
             "successMetrics": { "$ref": "#/$defs/questionState" }
-          },
-          "required": ["onePurpose", "userRoles", "mustRequirements", "outOfScope", "userJourneys", "constraints", "successMetrics"]
-        },
-        "branches": {
-          "type": "object",
-          "description": "Branch modules (conditional based on capabilities)",
-          "properties": {
-            "api": { "$ref": "#/$defs/branchState" },
-            "database": { "$ref": "#/$defs/branchState" },
-            "bpmn": { "$ref": "#/$defs/branchState" },
-            "ciQuality": { "$ref": "#/$defs/branchState" }
           }
         },
         "docsWritten": {
           "type": "object",
-          "description": "Stage A document drafts written",
+          "description": "Stage A doc files present (auto-updated when `check-docs` passes)",
+          "additionalProperties": false,
+          "required": ["requirements", "nfr", "glossary", "riskQuestions"],
           "properties": {
             "requirements": { "type": "boolean" },
             "nfr": { "type": "boolean" },
@@ -54,7 +71,7 @@
         },
         "validated": {
           "type": "boolean",
-          "description": "check-docs passed"
+          "description": "`check-docs` passed"
         },
         "userApproved": {
           "type": "boolean",
@@ -65,6 +82,8 @@
     "stage-b": {
       "type": "object",
       "description": "Stage B: Blueprint generation progress",
+      "additionalProperties": false,
+      "required": ["drafted", "validated", "packsReviewed", "userApproved"],
       "properties": {
         "drafted": { "type": "boolean" },
         "validated": { "type": "boolean" },
@@ -75,47 +94,50 @@
     "stage-c": {
       "type": "object",
       "description": "Stage C: Scaffold and skills",
+      "additionalProperties": false,
+      "required": [
+        "scaffoldApplied",
+        "configsGenerated",
+        "manifestUpdated",
+        "wrappersSynced",
+        "userApproved"
+      ],
       "properties": {
-        "scaffoldPreviewed": { "type": "boolean" },
         "scaffoldApplied": { "type": "boolean" },
+        "configsGenerated": { "type": "boolean" },
         "manifestUpdated": { "type": "boolean" },
-        "wrapperssynced": { "type": "boolean" },
+        "wrappersSynced": { "type": "boolean" },
         "userApproved": { "type": "boolean" }
       }
     },
     "history": {
       "type": "array",
-      "description": "Conversation checkpoints for audit",
-      "items": {
-        "type": "object",
-        "properties": {
-          "timestamp": { "type": "string", "format": "date-time" },
-          "event": { "type": "string" },
-          "details": { "type": "string" }
-        }
-      }
+      "description": "Audit trail of stage transitions and validations.",
+      "items": { "$ref": "#/$defs/historyEvent" }
     }
   },
   "$defs": {
     "questionState": {
       "type": "object",
+      "additionalProperties": false,
+      "required": ["asked", "answered", "writtenTo"],
       "properties": {
         "asked": { "type": "boolean" },
         "answered": { "type": "boolean" },
-        "writtenTo": { 
-          "type": "string",
-          "description": "Which doc file this answer was written to"
+        "writtenTo": {
+          "type": ["string", "null"],
+          "description": "Doc file path that received the answer (or null if not written)."
         }
       }
     },
-    "branchState": {
+    "historyEvent": {
       "type": "object",
+      "additionalProperties": false,
+      "required": ["timestamp", "event", "details"],
       "properties": {
-        "applicable": { 
-          "type": "boolean",
-          "description": "Whether this branch applies to this project"
-        },
-        "completed": { "type": "boolean" }
+        "timestamp": { "type": "string", "format": "date-time" },
+        "event": { "type": "string" },
+        "details": { "type": "string" }
       }
     }
   }

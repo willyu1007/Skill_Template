@@ -1,6 +1,6 @@
 ---
 name: initialize-project-from-requirements
-description: Use this only in repos that still include the init/ bootstrap kit to produce Stage A/B/C artifacts, update skill pack selection, and sync provider skill wrappers.
+description: Use only in repos that still include the `init/` bootstrap kit to produce Stage A/B/C artifacts, update skill pack selection, and sync provider skill wrappers.
 ---
 
 # Initialize a Project From Requirements
@@ -63,7 +63,9 @@ Optional inputs:
 - If found, resume from recorded state (ask user to confirm)
 - If not found, run `node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs start` to create initial state
 - **Validation fields** (`validated`) are automatically updated by `check-docs` and `validate` commands
+- **Document existence fields** (`docsWritten`) are automatically updated when `check-docs` passes
 - **Approval fields** (`userApproved`) and **stage transitions** are updated via `approve --stage <A|B|C>` command
+- **Interview progress fields** (`stage-a.mustAsk.*`) are not inferred automatically; update `init/.init-state.json` manually if you want `status` to reflect interview progress
 - State file will be deleted when `cleanup-init` is run
 
 ### Rule 2: Mandatory Checkpoints
@@ -84,12 +86,24 @@ Optional inputs:
 ### Stage A: interview → requirement docs (verifiable)
 
 1. **Initialize state**: Run `node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs start` to create `init/.init-state.json` and seed `init/stage-a-docs/` + `init/project-blueprint.json` templates.
-2. Use `templates/conversation-prompts.md` to run a structured requirements interview.
-3. Confirm whether the heavy `agent_builder` workflow is needed; if not, plan to run Stage C with `--skip-agent-builder --i-understand`.
-4. Update state as each question is answered (`stage-a.mustAsk.*`).
-5. Draft the four Stage A documents using templates under `templates/`.
-6. **Self-review**: Complete Stage A checklist in `templates/quality-checklist.md`.
-7. Validate Stage A docs:
+
+2. **Domain terminology alignment** (MUST ask, but completion is optional):
+   - Ask the user: "Before we collect requirements, would you like to align on domain terminology first?"
+   - Explain: "If your project has specific domain terms, abbreviations, or concepts that need shared understanding, we can document them in `domain-glossary.md` upfront."
+   - **If user chooses YES**:
+     - Guide user to list key domain terms
+     - Create/update `init/stage-a-docs/domain-glossary.md` with provided terms
+   - **If user chooses NO or LATER**:
+     - Record the decision in `init/stage-a-docs/domain-glossary.md` (for example: a short note `Status: deferred` or `No special terms yet`)
+     - Continue to next step; if domain terms emerge during interview, prompt to add them to glossary
+   - Asking the question is **mandatory**, but completing the glossary is **optional** — user may skip if terminology is straightforward
+
+3. Use `templates/conversation-prompts.md` to run a structured requirements interview.
+4. Confirm whether the heavy `agent_builder` workflow is needed; if not, plan to run Stage C with `--skip-agent-builder --i-understand`.
+5. (Optional) Update `init/.init-state.json` `stage-a.mustAsk.*` as each MUST-ask question is asked/answered, so `status` reflects interview progress.
+6. Draft the four Stage A documents using templates under `templates/`.
+7. **Self-review**: Complete Stage A checklist in `templates/quality-checklist.md`.
+8. Validate Stage A docs:
 
 ```bash
 node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs check-docs --docs-root init/stage-a-docs
@@ -101,8 +115,8 @@ Use strict mode when you need a hard gate (CI / regulated workflows):
 node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs check-docs --docs-root init/stage-a-docs --strict
 ```
 
-8. **CHECKPOINT A→B**: Use prompt from `templates/stage-checkpoints.md` to request user approval.
-9. Wait for explicit user approval, then run:
+9. **CHECKPOINT A→B**: Use prompt from `templates/stage-checkpoints.md` to request user approval.
+10. Wait for explicit user approval, then run:
 
 ```bash
 node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs approve --stage A
@@ -187,7 +201,7 @@ node init/skills/initialize-project-from-requirements/scripts/init-pipeline.cjs 
 - Do not add provider-specific assumptions into Stage A docs or the blueprint.
 - Do not edit `.codex/skills/` or `.claude/skills/` directly. Only update SSOT in `.ai/skills/` and run `node .ai/scripts/sync-skills.cjs --scope current --providers both --mode reset --yes`. (The repo's SSOT rule applies.) 
 - Scaffolding MUST NOT overwrite existing files; scaffolding should only create missing directories and small placeholder `README.md` files.
-- **Exception**: The root `README.md` will be replaced with a project-specific version generated from the blueprint. This is intentional—the template README should be replaced with project documentation.
+- **Exception**: The root `README.md` will be replaced with a project-specific version generated from the blueprint. The replacement is intentional — the template README should be replaced with project documentation.
 
 ---
 

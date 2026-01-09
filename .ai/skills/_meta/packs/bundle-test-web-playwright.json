@@ -1,0 +1,15 @@
+{
+  "id": "bundle-test-web-playwright",
+  "version": "1.0.0",
+  "description": "Playwright E2E testing bundle: bootstrap, author specs, run/debug, and triage failures.",
+  "includePrefixes": [
+    "testing/test-web-playwright/"
+  ],
+  "dependencies": [],
+  "scripts": {},
+  "metadata": {
+    "author": "routing-dispatch-meta-skill",
+    "tags": ["testing", "playwright", "e2e", "web", "bundle"],
+    "mutuallyExclusive": ["bundle-test-web-cypress"]
+  }
+}

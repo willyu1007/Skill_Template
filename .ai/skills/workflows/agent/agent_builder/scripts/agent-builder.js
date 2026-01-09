@@ -71,14 +71,14 @@ Commands:
 
 Examples:
   node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js start
-  node .../agent-builder.js approve --workdir <WORKDIR> --stage A
-  node .../agent-builder.js validate-blueprint --workdir <WORKDIR>
-  node .../agent-builder.js approve --workdir <WORKDIR> --stage B
-  node .../agent-builder.js plan --workdir <WORKDIR> --repo-root .
-  node .../agent-builder.js apply --workdir <WORKDIR> --repo-root . --apply
-  node .../agent-builder.js verify --workdir <WORKDIR> --repo-root .
-  node .../agent-builder.js verify --workdir <WORKDIR> --repo-root . --skip-http  # for sandbox/CI
-  node .../agent-builder.js finish --workdir <WORKDIR> --apply
+  node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js approve --workdir <WORKDIR> --stage A
+  node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js validate-blueprint --workdir <WORKDIR>
+  node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js approve --workdir <WORKDIR> --stage B
+  node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js plan --workdir <WORKDIR> --repo-root .
+  node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js apply --workdir <WORKDIR> --repo-root . --apply
+  node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js verify --workdir <WORKDIR> --repo-root .
+  node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js verify --workdir <WORKDIR> --repo-root . --skip-http  # for sandbox/CI
+  node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js finish --workdir <WORKDIR> --apply
 `;
   console.log(msg.trim());
   process.exit(exitCode);

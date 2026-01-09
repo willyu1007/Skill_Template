@@ -13,33 +13,55 @@
 
 Ask these before writing the first draft of `init/stage-a-docs/requirements.md`:
 
-1. **One-line purpose**
-   - "In one sentence, what problem does this project solve, for whom, and what is the main outcome?"
+### 0. Domain terminology alignment (MUST ask, optional to complete)
 
-2. **Primary user roles**
-   - "Who are the primary users (2–5 roles)?"
-   - "Who is NOT a user?"
+**This question MUST be asked before all other questions**, but user may choose to skip.
 
-3. **In-scope MUST requirements (3–10)**
-   - "List the MUST-have capabilities. Each MUST should be testable."
+- "Before we start collecting requirements, would you like to align on domain terminology first?"
+- "If your project has specific domain terms, abbreviations, or concepts that need a shared understanding, we can document them in `domain-glossary.md` upfront."
 
-4. **Out-of-scope (explicit OUT)**
-   - "List what we will NOT do in this version."
+**Prompts if user chooses YES:**
+- "Please list the key domain terms that are important for this project."
+- "For each term, provide: (1) definition, (2) any synonyms, (3) what it is NOT (non-examples if helpful)."
+- Example prompt: "What does '<term>' mean in this project's context?"
 
-5. **Top user journeys (2–5)**
-   - "Describe the top user journeys end-to-end."
-   - For each journey: "What is the acceptance criterion (AC)?"
+**If user chooses NO or LATER:**
+- Record the decision and proceed to the next question.
+- During the interview, if domain-specific terms emerge, prompt: "This term '<term>' seems domain-specific. Should we add it to the glossary?"
+- At the end of Stage A, revisit: "We encountered these terms during the interview: <list>. Would you like to formalize them in the glossary?"
 
-6. **Constraints**
-   - "Hard constraints (compliance, security, platforms, deadlines, budget, integrations)?"
-   - "Any non-negotiable tech constraints?"
+**Write to:**
+- `init/stage-a-docs/domain-glossary.md`
 
-7. **Success metrics**
-   - "How do we measure success? (business + product + reliability)"
+---
 
-8. **Agent builder workflow (heavy, optional)**
-   - "Do you need the `agent_builder` workflow skill in this repo?"
-   - If no: record the decision and plan to run Stage C with `--skip-agent-builder --i-understand` to prune `.ai/skills/workflows/agent` after initialization.
+### 1. One-line purpose
+- "In one sentence, what problem does this project solve, for whom, and what is the main outcome?"
+
+### 2. Primary user roles
+- "Who are the primary users (2–5 roles)?"
+- "Who is NOT a user?"
+
+### 3. In-scope MUST requirements (3–10)
+- "List the MUST-have capabilities. Each MUST should be testable."
+
+### 4. Out-of-scope (explicit OUT)
+- "List what we will NOT do in this version."
+
+### 5. Top user journeys (2–5)
+- "Describe the top user journeys end-to-end."
+- For each journey: "What is the acceptance criterion (AC)?"
+
+### 6. Constraints
+- "Hard constraints (compliance, security, platforms, deadlines, budget, integrations)?"
+- "Any non-negotiable tech constraints?"
+
+### 7. Success metrics
+- "How do we measure success? (business + product + reliability)"
+
+### 8. Agent builder workflow (heavy, optional)
+- "Do you need the `agent_builder` workflow skill in this repo?"
+- If no: record the decision and plan to run Stage C with `--skip-agent-builder --i-understand` to prune `.ai/skills/workflows/agent` after initialization.
 
 ## B. Branch modules (ask only if relevant)
 

@@ -78,20 +78,20 @@ This script is dependency-free (Node.js only).
 node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js start
 
 # Approve Stage A
-node .../agent-builder.js approve --workdir <WORKDIR> --stage A
+node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js approve --workdir <WORKDIR> --stage A
 
 # Validate and approve Stage B
-node .../agent-builder.js validate-blueprint --workdir <WORKDIR>
-node .../agent-builder.js approve --workdir <WORKDIR> --stage B
+node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js validate-blueprint --workdir <WORKDIR>
+node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js approve --workdir <WORKDIR> --stage B
 
 # Apply scaffold
-node .../agent-builder.js apply --workdir <WORKDIR> --repo-root . --apply
+node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js apply --workdir <WORKDIR> --repo-root . --apply
 
 # Verify acceptance scenarios
-node .../agent-builder.js verify --workdir <WORKDIR> --repo-root .
+node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js verify --workdir <WORKDIR> --repo-root .
 
 # Cleanup (--apply required to actually delete)
-node .../agent-builder.js finish --workdir <WORKDIR> --apply
+node .ai/skills/workflows/agent/agent_builder/scripts/agent-builder.js finish --workdir <WORKDIR> --apply
 ```
 
 ---

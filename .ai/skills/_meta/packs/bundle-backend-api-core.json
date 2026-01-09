@@ -1,0 +1,17 @@
+{
+  "id": "bundle-backend-api-core",
+  "version": "1.0.0",
+  "description": "Minimal backend API development bundle: routing/controllers, validation, error handling, and API guidelines.",
+  "includePrefixes": [
+    "backend/",
+    "workflows/backend/debug-authenticated-routes/",
+    "workflows/backend/map-route-changes-for-testing/",
+    "workflows/backend/test-authenticated-routes/"
+  ],
+  "dependencies": [],
+  "scripts": {},
+  "metadata": {
+    "author": "routing-dispatch-meta-skill",
+    "tags": ["backend", "api", "validation", "bundle"]
+  }
+}
