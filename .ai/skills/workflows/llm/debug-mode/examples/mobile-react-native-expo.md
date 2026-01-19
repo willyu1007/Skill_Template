@@ -1,14 +1,14 @@
 # Example — React Native / Expo (Expo Go)
 
-## When to use this example
-Use this when the user mentions:
+## When to use the example
+Use the example when the user mentions:
 - React Native
 - Expo / Expo Go
 - Metro bundler
 - EAS builds
 - iOS simulator / Android emulator issues
 
-This is an **example guide**. Prefer the project's own README/scripts when available.
+Example guide only. Prefer the project's own README/scripts when available.
 
 ## Where to look for logs
 
