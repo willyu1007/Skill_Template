@@ -61,7 +61,7 @@
   "interfaces": [
     {
       "type": "http",
-      "entrypoint": "node src/adapters/http/server.js",
+      "entrypoint": "node src/adapters/http/server.mjs",
       "request_schema_ref": "#/schemas/RunRequest",
       "response_schema_ref": "#/schemas/RunResponse",
       "error_schema_ref": "#/schemas/AgentError",
@@ -74,7 +74,7 @@
     },
     {
       "type": "worker",
-      "entrypoint": "node src/adapters/worker/worker.js",
+      "entrypoint": "node src/adapters/worker/worker.mjs",
       "request_schema_ref": "#/schemas/RunRequest",
       "response_schema_ref": "#/schemas/RunResponse",
       "error_schema_ref": "#/schemas/AgentError",
@@ -83,7 +83,7 @@
     },
     {
       "type": "sdk",
-      "entrypoint": "require('agents/example-agent').runAgent",
+      "entrypoint": "import('agents/example-agent').then(m => m.runAgent)",
       "request_schema_ref": "#/schemas/RunRequest",
       "response_schema_ref": "#/schemas/RunResponse",
       "error_schema_ref": "#/schemas/AgentError",
@@ -92,7 +92,7 @@
     },
     {
       "type": "cron",
-      "entrypoint": "node src/adapters/cron/cron.js",
+      "entrypoint": "node src/adapters/cron/cron.mjs",
       "request_schema_ref": "#/schemas/RunRequest",
       "response_schema_ref": "#/schemas/RunResponse",
       "error_schema_ref": "#/schemas/AgentError",
@@ -101,7 +101,7 @@
     },
     {
       "type": "pipeline",
-      "entrypoint": "node src/adapters/pipeline/pipeline.js",
+      "entrypoint": "node src/adapters/pipeline/pipeline.mjs",
       "request_schema_ref": "#/schemas/RunRequest",
       "response_schema_ref": "#/schemas/RunResponse",
       "error_schema_ref": "#/schemas/AgentError",

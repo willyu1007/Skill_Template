@@ -13,12 +13,12 @@
         {
           "check": "HTTP server adapter exists",
           "result": true,
-          "actual": "agents/example-agent/src/adapters/http/server.js"
+          "actual": "agents/example-agent/src/adapters/http/server.mjs"
         },
         {
           "check": "Core run module exists",
           "result": true,
-          "actual": "agents/example-agent/src/core/run.js"
+          "actual": "agents/example-agent/src/core/run.mjs"
         },
         {
           "check": "Request/Response schemas exist",

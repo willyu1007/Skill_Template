@@ -30,7 +30,7 @@ Template repository. Users clone the repo to start new AI-friendly projects.
 - Follow progressive disclosure: read only the file you are routed to
 - On context reset for ongoing work, read `dev-docs/active/<task-slug>/00-overview.md` first
 
-## Coding Standards (MUST)
+## Coding Standards (RECOMMEND)
 
 - **ESM (.mjs)**: All scripts in the repo use ES Modules with `.mjs` extension. Use `import`/`export` syntax, not `require()`.
 

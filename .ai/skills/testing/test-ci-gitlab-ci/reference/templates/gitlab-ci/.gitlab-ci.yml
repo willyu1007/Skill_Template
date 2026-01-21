@@ -82,7 +82,7 @@ perf-k6-smoke:
   before_script:
     - mkdir -p artifacts/k6
   script:
-    - k6 run tests/perf/k6/scripts/smoke.js --summary-export artifacts/k6/summary.json
+    - k6 run tests/perf/k6/scripts/smoke.mjs --summary-export artifacts/k6/summary.json
   variables:
     BASE_URL: ${API_BASE_URL}
     API_TOKEN: ${API_TOKEN}
