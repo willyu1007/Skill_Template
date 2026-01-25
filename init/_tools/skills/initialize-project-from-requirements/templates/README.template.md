@@ -72,9 +72,11 @@
 {{#HAS_INIT_KIT}}
 ## Initialization (Bootstrap Kit)
 
+- Intake doc (LLM-maintained blocks): `init/START-HERE.md`
+- Generated board: `init/INIT-BOARD.md`
 - Human guide: `init/README.md`
 - LLM instructions: `init/AGENTS.md`
-- Optional cleanup (after archiving): `node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs cleanup-init --apply --i-understand --archive`
+- Optional cleanup (after archiving): `node init/_tools/init.mjs cleanup-init --apply --i-understand --archive`
 {{/HAS_INIT_KIT}}
 
 ## Skill Entry Points

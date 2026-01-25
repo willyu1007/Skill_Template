@@ -212,11 +212,10 @@
             "type": "string",
             "enum": [
               "workflows",
+              "standards",
+              "testing",
               "backend",
-              "frontend",
-              "ops",
-              "data",
-              "diagrams"
+              "frontend"
             ]
           }
         },

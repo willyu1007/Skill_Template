@@ -4,14 +4,14 @@
 
 - Use the prompts as a **question bank** for Stage A. Ask the **MUST-ask** set first, then use **branch modules** based on the project's capabilities.
 - Every answer MUST be written into a file artifact:
-  - Stage A docs under `init/stage-a-docs/` (human-readable SSOT for intent)
-  - Stage B blueprint at `init/project-blueprint.json` (machine-readable SSOT for scaffolding / pack selection)
-- If the user cannot decide, record it as **TBD** in `init/stage-a-docs/risk-open-questions.md` with:
+  - Stage A docs under `init/_work/stage-a-docs/` (human-readable SSOT for intent)
+  - Stage B blueprint at `init/_work/project-blueprint.json` (machine-readable SSOT for scaffolding / pack selection)
+- If the user cannot decide, record it as **TBD** in `init/_work/stage-a-docs/risk-open-questions.md` with:
   - owner, options, and decision due.
 
 ## A. MUST-ask (minimal set)
 
-Ask these before writing the first draft of `init/stage-a-docs/requirements.md`:
+Ask these before writing the first draft of `init/_work/stage-a-docs/requirements.md`:
 
 ### 0. Domain terminology alignment (MUST ask, optional to complete)
 
@@ -31,7 +31,7 @@ Ask these before writing the first draft of `init/stage-a-docs/requirements.md`:
 - At the end of Stage A, revisit: "We encountered these terms during the interview: <list>. Would you like to formalize them in the glossary?"
 
 **Write to:**
-- `init/stage-a-docs/domain-glossary.md`
+- `init/_work/stage-a-docs/domain-glossary.md`
 
 ---
 
@@ -77,7 +77,7 @@ Ask if the project has `capabilities.api.style != "none"` or has external integr
 - Rate limiting / abuse controls (if public)
 
 Write to:
-- Stage A: `init/stage-a-docs/requirements.md` (high-level)
+- Stage A: `init/_work/stage-a-docs/requirements.md` (high-level)
 - Stage B: `capabilities.api.*`
 
 ### B2. Database module (if persistent data exists)
@@ -91,7 +91,7 @@ Ask if `capabilities.database.enabled == true`.
 - Backup / restore requirements
 
 Write to:
-- Stage A: `init/stage-a-docs/non-functional-requirements.md` + `requirements.md` (entities)
+- Stage A: `init/_work/stage-a-docs/non-functional-requirements.md` + `requirements.md` (entities)
 - Stage B: `capabilities.database.*`
 
 ### B3. BPMN / process module (if business workflows matter)
@@ -105,7 +105,7 @@ Ask if `capabilities.bpmn.enabled == true`.
 - Audit needs (who did what, when)
 
 Write to:
-- Stage A: `init/stage-a-docs/requirements.md` + `risk-open-questions.md`
+- Stage A: `init/_work/stage-a-docs/requirements.md` + `risk-open-questions.md`
 - Optional future artifact: `docs/context/process/*.bpmn`
 
 ### B4. CI / quality module (if the project will be maintained)
@@ -119,7 +119,7 @@ Ask if `quality.ci.enabled == true` or `quality.testing.enabled == true`.
 - Release cadence expectations
 
 Write to:
-- Stage A: `init/stage-a-docs/non-functional-requirements.md`
+- Stage A: `init/_work/stage-a-docs/non-functional-requirements.md`
 - Stage B: `quality.*`
 
 ### B5. Tech Stack module (MUST-ask for new projects)
@@ -157,24 +157,24 @@ Ask these to populate `repo.language`, `repo.packageManager`, and `capabilities.
 
 Write to:
 - Stage B: `repo.language`, `repo.packageManager`, `capabilities.frontend.framework`, `capabilities.backend.framework`
-- Stage A: `init/stage-a-docs/non-functional-requirements.md` (tech stack section, if needed for documentation)
+- Stage A: `init/_work/stage-a-docs/non-functional-requirements.md` (tech stack section, if needed for documentation)
 
 ## C. Answer → Artifact mapping cheat sheet
 
 Use the following mapping to avoid "knowledge floating in chat":
 
-- Scope (MUST/OUT) → `init/stage-a-docs/requirements.md` (`## Goals`, `## Non-goals`)
-- User journeys + AC → `init/stage-a-docs/requirements.md` (`## Users and user journeys`)
-- Constraints/NFR → `init/stage-a-docs/non-functional-requirements.md`
-- Tech stack decisions → `init/project-blueprint.json` (`repo.language`, `repo.packageManager`, `capabilities.*.framework`)
-- Glossary terms/entities → `init/stage-a-docs/domain-glossary.md`
-- TBD decisions/risks → `init/stage-a-docs/risk-open-questions.md`
-- Repo layout/pack selection decisions → `init/project-blueprint.json`
+- Scope (MUST/OUT) → `init/_work/stage-a-docs/requirements.md` (`## Goals`, `## Non-goals`)
+- User journeys + AC → `init/_work/stage-a-docs/requirements.md` (`## Users and user journeys`)
+- Constraints/NFR → `init/_work/stage-a-docs/non-functional-requirements.md`
+- Tech stack decisions → `init/_work/project-blueprint.json` (`repo.language`, `repo.packageManager`, `capabilities.*.framework`)
+- Glossary terms/entities → `init/_work/stage-a-docs/domain-glossary.md`
+- TBD decisions/risks → `init/_work/stage-a-docs/risk-open-questions.md`
+- Repo layout/pack selection decisions → `init/_work/project-blueprint.json`
 
 ## Verification
 
 - After the interview, run Stage A validation:
 
 ```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs check-docs --docs-root init/stage-a-docs
+node init/_tools/init.mjs check-docs --docs-root init/_work/stage-a-docs
 ```

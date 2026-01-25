@@ -58,6 +58,8 @@
   "skills": {
     "packs": [
       "workflows",
+      "standards",
+      "testing",
       "backend",
       "frontend"
     ]

@@ -84,11 +84,12 @@ Run the Stage B checklist after drafting `project-blueprint.json`, **before** re
 ### B3. Skill Packs
 
 - [ ] Does `skills.packs` include `workflows` (always required)?
-- [ ] Does `skills.packs` match the enabled capabilities?
-  - `backend.enabled` → `backend` pack
-  - `frontend.enabled` → `frontend` pack
-  - `database.enabled` → `data` pack
-- [ ] Are there no **extra** packs that don't match any capability?
+- [ ] Does `skills.packs` include `standards` (recommended)?
+- [ ] Does `skills.packs` match project signals?
+  - `capabilities.backend.enabled` → `backend` pack
+  - `capabilities.frontend.enabled` → `frontend` pack
+  - `quality.testing.enabled` → `testing` pack
+- [ ] Are extra packs intentional and approved by the user?
 
 ### B4. Repo Layout
 
@@ -119,8 +120,8 @@ Run the Stage C checklist after `apply` command, **before** cleanup.
 
 ### C3. Cleanup Readiness
 
-- [ ] Are Stage A docs present in `init/stage-a-docs/` (or archived to `docs/project/overview/` if cleanup is requested)?
-- [ ] Is `init/project-blueprint.json` present (or archived to `docs/project/overview/` if cleanup is requested)?
+- [ ] Are Stage A docs present in `init/_work/stage-a-docs/` (or archived to `docs/project/overview/` if cleanup is requested)?
+- [ ] Is `init/_work/project-blueprint.json` present (or archived to `docs/project/overview/` if cleanup is requested)?
 - [ ] Is `.ai/skills/_meta/sync-manifest.json` preserved?
 - [ ] Are you confident the init kit is no longer needed?
 

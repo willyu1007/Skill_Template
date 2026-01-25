@@ -4,8 +4,8 @@
  *
  * Dependency-free helper for a 3-stage, verifiable init pipeline:
  *
- *   Stage A: requirements docs under `init/stage-a-docs/`
- *   Stage B: blueprint JSON at `init/project-blueprint.json`
+ *   Stage A: requirements docs under `init/_work/stage-a-docs/`
+ *   Stage B: blueprint JSON at `init/_work/project-blueprint.json`
  *   Stage C: minimal scaffold + skill pack manifest update + wrapper sync
  *
  * Commands:
@@ -19,9 +19,30 @@
  *   - apply          validate + (optional) check-docs + scaffold + configs + manifest update + wrapper sync
  *   - cleanup-init   Remove the `init/` bootstrap kit (opt-in, guarded)
  *   - review-skill-retention  Mark Stage C skill retention as reviewed
+ *   - migrate-workdir Move legacy init outputs into init/_work (optional)
+ *   - update-intake  Update init/START-HERE.md (intake doc; LLM-maintained blocks)
+ *   - update-board   Update init/INIT-BOARD.md (generated kanban + digest)
  *   - update-root-docs  Generate/update root README.md and AGENTS.md from the blueprint
  *
  * This script is intentionally framework-agnostic. It avoids generating code.
+ *
+ * Code Structure (for maintainers):
+ * ---------------------------------
+ *   Lines ~38-275:   Utilities & CLI (usage, parseArgs, file I/O helpers)
+ *   Lines ~275-490:  State Management (loadState, saveState, getStageProgress)
+ *   Lines ~490-1390: Entry Docs (START-HERE.md + INIT-BOARD.md generation, i18n)
+ *   Lines ~1390-1500: Config Generation (template rendering, scaffold configs)
+ *   Lines ~1500-1690: Blueprint & Packs (validation, pack mapping, suggestions)
+ *   Lines ~1690-1760: Docs Validation (check-docs for Stage A)
+ *   Lines ~1760-2020: Scaffold & Root Docs (README.md, AGENTS.md generation)
+ *   Lines ~2020-2200: Init Templates & Manifest (template seeding, manifest update)
+ *   Lines ~2200-2320: Cleanup & Archive (pruning, file operations, cleanup-init)
+ *   Lines ~2320-EOF:  Main CLI (command dispatching and execution)
+ *
+ * Modularization Note:
+ *   The script is intentionally kept as a single file for bootstrap simplicity.
+ *   If it grows significantly (>4000 lines), consider splitting into:
+ *   - lib/state.mjs, lib/entry-docs.mjs, lib/blueprint.mjs, lib/scaffold.mjs
  */
 
 import fs from 'node:fs';
@@ -35,7 +56,10 @@ const __dirname = path.dirname(__filename);
 function usage(exitCode = 0) {
   const msg = `
 Usage:
-  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs <command> [options]
+  node init/_tools/init.mjs <command> [options]
+
+Canonical:
+  node init/_tools/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs <command> [options]
 
 Commands:
   start
@@ -57,33 +81,34 @@ Commands:
     Approve current stage and advance to next stage (after user review).
 
   validate
-    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/project-blueprint.json)
+    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/_work/project-blueprint.json)
     --repo-root <path>          Repo root (default: cwd)
     --format <text|json>        Output format (default: text)
 
   check-docs
-    --docs-root <path>          Stage A docs root (default: <repo-root>/init/stage-a-docs)
+    --docs-root <path>          Stage A docs root (default: <repo-root>/init/_work/stage-a-docs)
     --repo-root <path>          Repo root (default: cwd)
     --strict                    Treat warnings as errors (exit non-zero)
     --format <text|json>        Output format (default: text)
 
   suggest-packs
-    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/project-blueprint.json)
+    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/_work/project-blueprint.json)
     --repo-root <path>          Repo root (default: cwd)
     --format <text|json>        Output format (default: text)
     --write                      Add missing recommended packs into blueprint (safe-add only)
 
   scaffold
-    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/project-blueprint.json)
+    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/_work/project-blueprint.json)
     --repo-root <path>          Repo root (default: cwd)
     --apply                      Actually create directories/files (default: dry-run)
 
   apply
-    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/project-blueprint.json)
+    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/_work/project-blueprint.json)
     --repo-root <path>          Repo root (default: cwd)
     --providers <both|codex|claude|codex,claude>
                                 Providers to sync (default: both)
-    --require-stage-a           Run 'check-docs --strict' and fail if it does not pass
+    --require-stage-a           Run 'check-docs' and fail if it has errors
+    --require-stage-a-strict    Run 'check-docs --strict' and fail if it does not pass
     --skip-configs              Skip generating config files (package.json, etc.)
     --skip-readme               Skip generating root README.md from blueprint
     --skip-root-agents          Skip updating root AGENTS.md from blueprint
@@ -108,9 +133,31 @@ Commands:
     --repo-root <path>          Repo root (default: cwd)
     Mark Stage C skill retention as reviewed (required before approving Stage C).
 
+  migrate-workdir
+    --repo-root <path>          Repo root (default: cwd)
+    --apply                      Actually move legacy paths (default: dry-run)
+    Move legacy init outputs (init/.init-state.json, init/stage-a-docs/, init/project-blueprint.json)
+    into init/_work/ (non-destructive; refuses to overwrite).
+
+  update-intake
+    --repo-root <path>          Repo root (default: cwd)
+    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/_work/project-blueprint.json)
+    --docs-root <path>          Stage A docs root (default: <repo-root>/init/_work/stage-a-docs)
+    --path <path>               Entry doc path (default: <repo-root>/init/START-HERE.md)
+    --apply                      Actually write the doc (default: dry-run)
+    Update the intake doc. Preserves LLM blocks.
+
+  update-board
+    --repo-root <path>          Repo root (default: cwd)
+    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/_work/project-blueprint.json)
+    --docs-root <path>          Stage A docs root (default: <repo-root>/init/_work/stage-a-docs)
+    --path <path>               Board doc path (default: <repo-root>/init/INIT-BOARD.md)
+    --apply                      Actually write the board (default: dry-run)
+    Update the generated init board (routing map + kanban + blueprint digest).
+
   update-root-docs
     --repo-root <path>          Repo root (default: cwd)
-    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/project-blueprint.json)
+    --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/_work/project-blueprint.json)
     --apply                      Actually write root docs (default: dry-run)
     --skip-readme               Skip generating root README.md
     --skip-root-agents          Skip updating root AGENTS.md
@@ -125,16 +172,19 @@ Commands:
     --i-understand              Required acknowledgement (refuses without it)
 
 Examples:
-  node .../init-pipeline.mjs start
-  node .../init-pipeline.mjs status
-  node .../init-pipeline.mjs check-docs --docs-root init/stage-a-docs
-  node .../init-pipeline.mjs validate --blueprint init/project-blueprint.json
-  node .../init-pipeline.mjs approve --stage A
-  node .../init-pipeline.mjs apply --blueprint init/project-blueprint.json --providers codex,claude
-  node .../init-pipeline.mjs review-skill-retention
-  node .../init-pipeline.mjs update-root-docs --apply
-  node .../init-pipeline.mjs prune-agent-builder --apply --i-understand
-  node .../init-pipeline.mjs cleanup-init --apply --i-understand --archive
+  node init/_tools/init.mjs start
+  node init/_tools/init.mjs status
+  node init/_tools/init.mjs check-docs --docs-root init/_work/stage-a-docs
+  node init/_tools/init.mjs validate --blueprint init/_work/project-blueprint.json
+  node init/_tools/init.mjs approve --stage A
+  node init/_tools/init.mjs apply --blueprint init/_work/project-blueprint.json --providers codex,claude
+  node init/_tools/init.mjs review-skill-retention
+  node init/_tools/init.mjs migrate-workdir --apply
+  node init/_tools/init.mjs update-intake --apply
+  node init/_tools/init.mjs update-board --apply
+  node init/_tools/init.mjs update-root-docs --apply
+  node init/_tools/init.mjs prune-agent-builder --apply --i-understand
+  node init/_tools/init.mjs cleanup-init --apply --i-understand --archive
 `;
   console.log(msg.trim());
   process.exit(exitCode);
@@ -178,6 +228,38 @@ function resolvePath(base, p) {
   return path.resolve(base, p);
 }
 
+const INIT_WORK_DEFAULT_REL = path.join('init', '_work');
+const STAGE_A_DOCS_DEFAULT_REL = path.join(INIT_WORK_DEFAULT_REL, 'stage-a-docs');
+const BLUEPRINT_DEFAULT_REL = path.join(INIT_WORK_DEFAULT_REL, 'project-blueprint.json');
+const INIT_STATE_DEFAULT_REL = path.join(INIT_WORK_DEFAULT_REL, '.init-state.json');
+
+const LEGACY_STAGE_A_DOCS_REL = path.join('init', 'stage-a-docs');
+const LEGACY_BLUEPRINT_REL = path.join('init', 'project-blueprint.json');
+const LEGACY_INIT_STATE_REL = path.join('init', '.init-state.json');
+
+function resolveDocsRoot(repoRoot, provided) {
+  if (provided) return resolvePath(repoRoot, provided);
+  const modern = path.join(repoRoot, STAGE_A_DOCS_DEFAULT_REL);
+  const legacy = path.join(repoRoot, LEGACY_STAGE_A_DOCS_REL);
+  if (!fs.existsSync(modern) && fs.existsSync(legacy)) return legacy;
+  return modern;
+}
+
+function resolveBlueprintPath(repoRoot, provided) {
+  if (provided) return resolvePath(repoRoot, provided);
+  const modern = path.join(repoRoot, BLUEPRINT_DEFAULT_REL);
+  const legacy = path.join(repoRoot, LEGACY_BLUEPRINT_REL);
+  if (!fs.existsSync(modern) && fs.existsSync(legacy)) return legacy;
+  return modern;
+}
+
+function resolveInitStatePath(repoRoot) {
+  const modern = path.join(repoRoot, INIT_STATE_DEFAULT_REL);
+  const legacy = path.join(repoRoot, LEGACY_INIT_STATE_REL);
+  if (!fs.existsSync(modern) && fs.existsSync(legacy)) return legacy;
+  return modern;
+}
+
 function readJson(filePath) {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
@@ -185,6 +267,21 @@ function readJson(filePath) {
   } catch (e) {
     die(`[error] Failed to read JSON: ${filePath}\n${e.message}`);
   }
+}
+
+function readBlueprintOrDie(repoRoot, blueprintPath) {
+  if (!fs.existsSync(blueprintPath)) {
+    const rel = toPosixPath(path.relative(repoRoot, blueprintPath));
+    const cmdStart = 'node init/_tools/init.mjs start --repo-root .';
+    die(
+      [
+        `[error] Blueprint not found: ${rel}`,
+        `[hint] Run: ${cmdStart}`,
+        '[hint] Or provide a custom path via: --blueprint <path>'
+      ].join('\n')
+    );
+  }
+  return readJson(blueprintPath);
 }
 
 function writeJson(filePath, data) {
@@ -204,7 +301,7 @@ const SCRIPT_DIR = __dirname;
 const TEMPLATES_DIR = path.join(SCRIPT_DIR, '..', 'templates');
 
 function getStatePath(repoRoot) {
-  return path.join(repoRoot, 'init', '.init-state.json');
+  return resolveInitStatePath(repoRoot);
 }
 
 function stageKey(letter) {
@@ -335,9 +432,11 @@ function getStageProgress(state) {
   };
 }
 
-function printStatus(state, repoRoot) {
+function printStatus(state, repoRoot, { docsRoot, blueprintPath } = {}) {
   const progress = getStageProgress(state);
   const stageNames = { A: 'Requirements', B: 'Blueprint', C: 'Scaffold', complete: 'Complete' };
+  const docsRel = docsRoot ? toPosixPath(path.relative(repoRoot, docsRoot)) : toPosixPath(STAGE_A_DOCS_DEFAULT_REL);
+  const bpRel = blueprintPath ? toPosixPath(path.relative(repoRoot, blueprintPath)) : toPosixPath(BLUEPRINT_DEFAULT_REL);
 
   console.log('');
   console.log('┌─────────────────────────────────────────────────────────┐');
@@ -378,22 +477,22 @@ function printStatus(state, repoRoot) {
   if (progress.stage === 'A') {
     if (!progress[stageKey('A')].validated) {
       console.log('│    1. Complete the interview and draft the docs');
-      console.log('│    2. Run: check-docs --docs-root init/stage-a-docs');
+      console.log(`│    2. Run: check-docs --docs-root ${docsRel}`);
     } else if (!progress[stageKey('A')].userApproved) {
       console.log('│    Ask the user to review Stage A docs');
       console.log('│    After approval run: approve --stage A');
     }
   } else if (progress.stage === 'B') {
     if (!progress[stageKey('B')].validated) {
-      console.log('│    1. Create init/project-blueprint.json');
-      console.log('│    2. Run: validate --blueprint init/project-blueprint.json');
+      console.log(`│    1. Create ${bpRel}`);
+      console.log(`│    2. Run: validate --blueprint ${bpRel}`);
     } else if (!progress[stageKey('B')].userApproved) {
       console.log('│    Ask the user to review the blueprint');
       console.log('│    After approval run: approve --stage B');
     }
   } else if (progress.stage === 'C') {
     if (!progress[stageKey('C')].wrappersSynced) {
-      console.log('│    Run: apply --blueprint init/project-blueprint.json');
+      console.log(`│    Run: apply --blueprint ${bpRel}`);
     } else if (!progress[stageKey('C')].skillRetentionReviewed) {
       console.log('│    Review skill retention (keep vs prune)');
       console.log('│    Then run: review-skill-retention');
@@ -407,6 +506,895 @@ function printStatus(state, repoRoot) {
 
   console.log('└─────────────────────────────────────────────────────────┘');
   console.log('');
+}
+
+// ============================================================================
+// Entry docs: START-HERE.md (manual) + INIT-BOARD.md (generated)
+// ============================================================================
+
+const START_HERE_DEFAULT_REL = path.join('init', 'START-HERE.md');
+const START_HEERE_LEGACY_REL = path.join('init', 'START-HEERE.md');
+const INIT_BOARD_DEFAULT_REL = path.join('init', 'INIT-BOARD.md');
+
+const INIT_KIT_MARKER_DEFAULT_REL = path.join('init', '_tools', '.init-kit');
+const INIT_KIT_MARKER_LEGACY_REL = path.join('init', '.init-kit');
+
+function toPosixPath(p) {
+  return String(p || '').replace(/\\/g, '/');
+}
+
+function detectWorkdirMode(repoRoot, docsRoot, blueprintPath, statePath) {
+  const docsRel = toPosixPath(path.relative(repoRoot, docsRoot));
+  const blueprintRel = toPosixPath(path.relative(repoRoot, blueprintPath));
+  const stateRel = toPosixPath(path.relative(repoRoot, statePath));
+
+  const modern = {
+    docs: toPosixPath(STAGE_A_DOCS_DEFAULT_REL),
+    blueprint: toPosixPath(BLUEPRINT_DEFAULT_REL),
+    state: toPosixPath(INIT_STATE_DEFAULT_REL)
+  };
+  const legacy = {
+    docs: toPosixPath(LEGACY_STAGE_A_DOCS_REL),
+    blueprint: toPosixPath(LEGACY_BLUEPRINT_REL),
+    state: toPosixPath(LEGACY_INIT_STATE_REL)
+  };
+
+  const legacyUsed = [];
+  if (docsRel === legacy.docs) legacyUsed.push(legacy.docs);
+  if (blueprintRel === legacy.blueprint) legacyUsed.push(legacy.blueprint);
+  if (stateRel === legacy.state) legacyUsed.push(legacy.state);
+
+  const modernUsed = [];
+  if (docsRel === modern.docs) modernUsed.push(modern.docs);
+  if (blueprintRel === modern.blueprint) modernUsed.push(modern.blueprint);
+  if (stateRel === modern.state) modernUsed.push(modern.state);
+
+  let mode = 'custom';
+  if (legacyUsed.length > 0 && modernUsed.length > 0) mode = 'mixed';
+  else if (legacyUsed.length > 0) mode = 'legacy';
+  else if (modernUsed.length === 3) mode = 'modern';
+
+  return {
+    mode,
+    docsRel,
+    blueprintRel,
+    stateRel,
+    legacyUsed,
+    modernUsed
+  };
+}
+
+function warnLegacyWorkdirIfNeeded(repoRoot, docsRoot, blueprintPath, statePath) {
+  const diag = detectWorkdirMode(repoRoot, docsRoot, blueprintPath, statePath);
+  if (diag.legacyUsed.length === 0) return;
+
+  const paths = diag.legacyUsed.map((p) => `\`${p}\``).join(', ');
+  const cmd = 'node init/_tools/init.mjs migrate-workdir --apply --repo-root .';
+
+  console.error(`[warn] Legacy init workdir path(s) detected: ${paths}`);
+  if (diag.mode === 'mixed') {
+    console.error('[warn] Some init paths resolve to legacy while others resolve to modern.');
+  }
+  console.error(`[warn] Recommended: migrate outputs into \`init/_work/\`:\n       ${cmd}`);
+}
+
+function normalizeLang(lang) {
+  const v = String(lang || '').trim().toLowerCase();
+  if (v === 'zh') return 'zh';
+  return 'en';
+}
+
+function parseStartHeereLanguage(content) {
+  const m = String(content || '').match(/^\s*language:\s*(zh|en)\b/im);
+  return m ? normalizeLang(m[1]) : 'en';
+}
+
+const START_HERE_BLOCK_TYPES = ['LLM', 'MANUAL'];
+const START_HERE_BLOCK_TYPE_PRIMARY = 'LLM';
+
+function startHeereMarker(type, id, which) {
+  return `<!-- ${which} ${type}:${id} -->`;
+}
+
+function extractStartHeereBlockInner(content, type, id) {
+  const begin = startHeereMarker(type, id, 'BEGIN');
+  const end = startHeereMarker(type, id, 'END');
+
+  const beginIdx = content.indexOf(begin);
+  if (beginIdx === -1) return null;
+  const afterBegin = beginIdx + begin.length;
+  const endIdx = content.indexOf(end, afterBegin);
+  if (endIdx === -1) return null;
+  return content.slice(afterBegin, endIdx);
+}
+
+function extractStartHeereBlockInnerAnyType(content, id) {
+  for (const type of START_HERE_BLOCK_TYPES) {
+    const inner = extractStartHeereBlockInner(content, type, id);
+    if (inner != null) return inner;
+  }
+  return null;
+}
+
+function normalizeBlockInner(inner) {
+  if (inner == null) return '\n';
+  let s = String(inner);
+  if (!s.startsWith('\n')) s = '\n' + s;
+  if (!s.endsWith('\n')) s = s + '\n';
+  return s;
+}
+
+function renderStartHeereBlock(type, id, inner) {
+  const begin = startHeereMarker(type, id, 'BEGIN');
+  const end = startHeereMarker(type, id, 'END');
+  return `${begin}${normalizeBlockInner(inner)}${end}`;
+}
+
+function escapeMarkdownTableCell(value) {
+  const s = String(value ?? '');
+  return s.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
+}
+
+function stringifyForTable(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function tryReadJson(filePath) {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    return { ok: true, value: JSON.parse(raw) };
+  } catch (e) {
+    return { ok: false, error: e };
+  }
+}
+
+function getAtPath(obj, dottedPath) {
+  if (!obj) return undefined;
+  const parts = String(dottedPath || '').split('.').filter(Boolean);
+  let cur = obj;
+  for (const p of parts) {
+    if (cur == null || typeof cur !== 'object') return undefined;
+    cur = cur[p];
+  }
+  return cur;
+}
+
+function getStartHeereManualDefaults(lang) {
+  const l = normalizeLang(lang);
+  if (l === 'zh') {
+    return {
+      SNAPSHOT:
+        '\n' +
+        '- project:\n' +
+        '- oneLine:\n' +
+        '- currentFocus:\n' +
+        '- keyDecisions:\n' +
+        '- openQuestions:\n',
+      WORKING_AGREEMENT:
+        '\n' +
+        '- timeZone:\n' +
+        '- asyncFirst: true\n' +
+        '- responseSLA:\n' +
+        '- meetingCadence:\n' +
+        '- decisionPolicy:\n' +
+        '  - preStageA: 可改\n' +
+        '  - stageA: 可改（注意校验器需要固定标题）\n' +
+        '  - stageB: 可改（重新运行 validate）\n' +
+        '  - stageC: 可改（重新运行 apply）\n',
+      MATERIALS_REGISTER:
+        '\n' +
+        '| ID | 类型 | 链接 | 负责人 | 提炼摘要 | 写入产物 | 状态 | 备注 |\n' +
+        '|---|---|---|---|---|---|---|---|\n' +
+        '| M-001 | doc | https:// |  |  |  | todo |  |\n',
+      PRE_STAGE_A_NOTES: '\n- \n'
+    };
+  }
+
+  return {
+    SNAPSHOT:
+      '\n' +
+      '- project:\n' +
+      '- oneLine:\n' +
+      '- currentFocus:\n' +
+      '- keyDecisions:\n' +
+      '- openQuestions:\n',
+    WORKING_AGREEMENT:
+      '\n' +
+      '- timeZone:\n' +
+      '- asyncFirst: true\n' +
+      '- responseSLA:\n' +
+      '- meetingCadence:\n' +
+      '- decisionPolicy:\n' +
+      '  - preStageA: editable\n' +
+      '  - stageA: editable (keep required headings for validator)\n' +
+      '  - stageB: editable (re-run validate)\n' +
+      '  - stageC: editable (re-run apply)\n',
+    MATERIALS_REGISTER:
+      '\n' +
+      '| ID | Type | Link | Owner | Extracted summary | Written to | Status | Notes |\n' +
+      '|---|---|---|---|---|---|---|---|\n' +
+      '| M-001 | doc | https:// |  |  |  | todo |  |\n',
+    PRE_STAGE_A_NOTES: '\n- \n'
+  };
+}
+
+function isSameMeaningfulContent(a, b) {
+  return String(a || '').trim() === String(b || '').trim();
+}
+
+function getStartHeereI18n(lang) {
+  const l = normalizeLang(lang);
+  if (l === 'zh') {
+    return {
+      title: '从这里开始（访谈入口）',
+      metaNote: [
+        '访谈入口文档（由流水线自动维护结构；内容由 LLM 自动维护）。',
+        '',
+        '生成看板：',
+        '  init/INIT-BOARD.md',
+        '',
+        '刷新方式：',
+        '- 隐式：大多数流水线命令会自动刷新 init/INIT-BOARD.md',
+        '- 手动（兜底）：',
+        '  node init/_tools/init.mjs update-board --apply --repo-root .',
+        '',
+        '安全门禁：',
+        '- 阶段推进前必须用户明确同意；不要在用户未确认时运行 approve --stage <A|B|C>。',
+        '',
+        '编辑规则：',
+        '- 仅编辑 "BEGIN LLM" / "END LLM" 区块内的内容（LLM 负责）。',
+        '- 流水线会在阶段推进/命令执行时自动刷新本文件（保留 LLM 区块内容）。',
+        '- 进度/路由/蓝图摘要等自动信息在 init/INIT-BOARD.md'
+      ].join('\n'),
+      sections: {
+        snapshot: '0. 摘要（LLM）',
+        workingAgreement: '1. 工作约定（LLM）',
+        materials: '2. 资料登记（LLM，不入库）',
+        notes: '3. 记录与要点（LLM）',
+        next: '4. 下一步（只读）'
+      },
+      labels: {
+        currentStage: '当前阶段',
+        stageA: '阶段 A（需求）',
+        stageB: '阶段 B（蓝图）',
+        stageC: '阶段 C（脚手架 + 技能）',
+        complete: '完成',
+        nextSteps: '下一步',
+        noState: '未检测到 init 状态文件。先运行 start 初始化。',
+        noBlueprint: '未检测到蓝图文件。先运行 start 创建模板，再编辑并 validate。'
+      }
+    };
+  }
+
+  return {
+    title: 'START HERE (Intake)',
+    metaNote: [
+      'Intake doc (pipeline-maintained structure; content is LLM-maintained).',
+      '',
+      'Generated board:',
+      '  init/INIT-BOARD.md',
+      '',
+      'Refresh policy:',
+      '- Implicit: most pipeline commands auto-refresh init/INIT-BOARD.md',
+      '- Manual (fallback):',
+      '  node init/_tools/init.mjs update-board --apply --repo-root .',
+      '',
+      'Safety gate:',
+      '- Stage transitions require explicit user approval. Do not run approve --stage <A|B|C> without the user confirming.',
+      '',
+      'Editing rules:',
+      '- Only edit inside the "BEGIN LLM" / "END LLM" blocks (LLM-owned).',
+      '- The pipeline may refresh this file when stages advance / commands run (LLM blocks are preserved).',
+      '- The generated board (routing + progress + digest) lives in init/INIT-BOARD.md'
+    ].join('\n'),
+    sections: {
+      snapshot: '0. Snapshot (LLM)',
+      workingAgreement: '1. Working Agreement (LLM)',
+      materials: '2. Materials Register (LLM, no uploads)',
+      notes: '3. Notes (LLM)',
+      next: '4. Next (Read-only)'
+    },
+    labels: {
+      currentStage: 'Current stage',
+      stageA: 'Stage A (Requirements)',
+      stageB: 'Stage B (Blueprint)',
+      stageC: 'Stage C (Scaffold + Skills)',
+      complete: 'Complete',
+      nextSteps: 'Next steps',
+      noState: 'No init state detected. Run start first.',
+      noBlueprint: 'No blueprint detected. Run start to create templates, then edit + validate.'
+    }
+  };
+}
+
+function toRelPathForBoard(repoRoot, p) {
+  if (!p) return '';
+  return toPosixPath(path.relative(repoRoot, p));
+}
+
+function toRelDirForBoard(repoRoot, p) {
+  const rel = toRelPathForBoard(repoRoot, p);
+  if (!rel) return '';
+  return rel.endsWith('/') ? rel : rel + '/';
+}
+
+function renderStartHeereRoutingMap(lang, { repoRoot, statePath, docsRoot, blueprintPath }) {
+  const l = normalizeLang(lang);
+  const stateRel = statePath ? toRelPathForBoard(repoRoot, statePath) : toPosixPath(INIT_STATE_DEFAULT_REL);
+  const docsRel = docsRoot ? toRelDirForBoard(repoRoot, docsRoot) : toPosixPath(STAGE_A_DOCS_DEFAULT_REL) + '/';
+  const bpRel = blueprintPath ? toRelPathForBoard(repoRoot, blueprintPath) : toPosixPath(BLUEPRINT_DEFAULT_REL);
+  const rows = l === 'zh'
+    ? [
+        ['`init/START-HERE.md`', '入口（LLM 维护：工作约定/资料/要点）', '必填'],
+        ['`init/INIT-BOARD.md`', '自动看板（路由/进度/蓝图摘要）', '自动生成'],
+        ['`init/README.md`', '人类可读说明（命令参考）', '参考'],
+        ['`init/AGENTS.md`', 'LLM 指令（给 AI 助手使用）', '参考'],
+        ['`init/_tools/`', '工具区（脚本/模板/清单）', '参考'],
+        ['`init/_work/`', '工作区（状态/阶段文档/蓝图）', '运行时生成'],
+        ['`init/_tools/stages/`', '阶段清单（可选参考）', '可选'],
+        [`\`${stateRel}\``, '初始化状态（驱动看板）', '运行时生成'],
+        [`\`${docsRel}\``, '阶段 A 文档（SSOT）', '必填'],
+        [`\`${bpRel}\``, '阶段 B 蓝图（机器可读 SSOT）', '必填'],
+        ['`.ai/skills/_meta/sync-manifest.json`', '启用的技能包（SSOT）', '阶段 C 生成'],
+        ['`.ai/skills/`', '技能 SSOT（只在这里编辑）', '阶段 C 相关'],
+        ['`.codex/skills/` / `.claude/skills/`', '生成的技能封装（不要手改）', '阶段 C 生成']
+      ]
+    : [
+        ['`init/START-HERE.md`', 'Intake doc (LLM-maintained: agreement + materials)', 'Required'],
+        ['`init/INIT-BOARD.md`', 'Generated board (routing + kanban + digest)', 'Auto-generated'],
+        ['`init/README.md`', 'Human guide (command reference)', 'Reference'],
+        ['`init/AGENTS.md`', 'LLM instructions (for AI assistants)', 'Reference'],
+        ['`init/_tools/`', 'Tooling (pipeline + templates + checklists)', 'Reference'],
+        ['`init/_work/`', 'Workspace (state + Stage A docs + blueprint)', 'Runtime-generated'],
+        ['`init/_tools/stages/`', 'Stage checklists (optional)', 'Optional'],
+        [`\`${stateRel}\``, 'Init state (drives the board)', 'Runtime-generated'],
+        [`\`${docsRel}\``, 'Stage A docs (SSOT)', 'Required'],
+        [`\`${bpRel}\``, 'Stage B blueprint (machine-readable SSOT)', 'Required'],
+        ['`.ai/skills/_meta/sync-manifest.json`', 'Enabled skill packs (SSOT)', 'Generated in Stage C'],
+        ['`.ai/skills/`', 'Skills SSOT (edit here only)', 'Stage C related'],
+        ['`.codex/skills/` / `.claude/skills/`', 'Generated wrappers (do not edit)', 'Generated in Stage C']
+      ];
+
+  const header = l === 'zh'
+    ? ['| 路径 | 作用 | 必填/来源 |', '|---|---|---|']
+    : ['| Path | Purpose | Required/Source |', '|---|---|---|'];
+
+  const lines = [...header, ...rows.map((r) => `| ${r[0]} | ${r[1]} | ${r[2]} |`)];
+  lines.push('');
+  lines.push(l === 'zh'
+    ? '常用命令：`start` → `check-docs` → `approve --stage A` → `validate` → `approve --stage B` → `apply` → `review-skill-retention` → `approve --stage C`'
+    : 'Common commands: `start` → `check-docs` → `approve --stage A` → `validate` → `approve --stage B` → `apply` → `review-skill-retention` → `approve --stage C`'
+  );
+  lines.push(l === 'zh'
+    ? '手动刷新看板：`update-board --apply`'
+    : 'Manual board refresh: `update-board --apply`'
+  );
+  return lines.join('\n') + '\n';
+}
+
+function renderStartHeereProgressBoard(lang, state, repoRoot, docsRoot, blueprintPath) {
+  const i18n = getStartHeereI18n(lang);
+  const l = normalizeLang(lang);
+  const docsRel = docsRoot ? toRelDirForBoard(repoRoot, docsRoot) : toPosixPath(STAGE_A_DOCS_DEFAULT_REL) + '/';
+  const bpRel = blueprintPath ? toRelPathForBoard(repoRoot, blueprintPath) : toPosixPath(BLUEPRINT_DEFAULT_REL);
+
+  if (!state) {
+    return `${i18n.labels.noState}\n\n\`\`\`bash\nnode init/_tools/init.mjs start --repo-root .\nnode init/_tools/init.mjs update-board --apply --repo-root .\n\`\`\`\n`;
+  }
+
+  const progress = getStageProgress(state);
+  const stage = progress.stage;
+
+  const stageLabel =
+    stage === 'A' ? i18n.labels.stageA :
+    stage === 'B' ? i18n.labels.stageB :
+    stage === 'C' ? i18n.labels.stageC :
+    i18n.labels.complete;
+
+  const lines = [];
+  lines.push(`${i18n.labels.currentStage}: **${stage}** (${stageLabel})`);
+  lines.push('');
+
+  // Stage A
+  const a = progress[stageKey('A')];
+  const aMustAskDone = a.mustAskAnswered >= a.mustAskTotal && a.mustAskTotal > 0;
+  const aDocsDone = a.docsWritten >= a.docsTotal && a.docsTotal > 0;
+  lines.push(`### ${i18n.labels.stageA}`);
+  lines.push(`- [${aMustAskDone ? 'x' : ' '}] ${l === 'zh' ? 'MUST-ask 已回答' : 'MUST-ask answered'}: ${a.mustAskAnswered}/${a.mustAskTotal}`);
+  lines.push(`- [${aDocsDone ? 'x' : ' '}] ${l === 'zh' ? '文档齐备' : 'Docs written'}: ${a.docsWritten}/${a.docsTotal}`);
+  lines.push(`- [${a.validated ? 'x' : ' '}] ${l === 'zh' ? 'check-docs 通过' : 'check-docs validated'}`);
+  lines.push(`- [${a.userApproved ? 'x' : ' '}] ${l === 'zh' ? '用户确认' : 'User approved'}`);
+  lines.push('');
+
+  // Stage B
+  const b = progress[stageKey('B')];
+  lines.push(`### ${i18n.labels.stageB}`);
+  lines.push(`- [${b.drafted ? 'x' : ' '}] ${l === 'zh' ? '已起草（蓝图文件存在）' : 'Drafted (blueprint exists)'}`);
+  lines.push(`- [${b.validated ? 'x' : ' '}] ${l === 'zh' ? 'validate 通过' : 'validate passed'}`);
+  lines.push(`- [${b.packsReviewed ? 'x' : ' '}] ${l === 'zh' ? 'packs 已复核' : 'packs reviewed'}`);
+  lines.push(`- [${b.userApproved ? 'x' : ' '}] ${l === 'zh' ? '用户确认' : 'User approved'}`);
+  lines.push('');
+
+  // Stage C
+  const c = progress[stageKey('C')];
+  lines.push(`### ${i18n.labels.stageC}`);
+  lines.push(`- [${c.scaffoldApplied ? 'x' : ' '}] ${l === 'zh' ? 'scaffold 已应用' : 'scaffold applied'}`);
+  lines.push(`- [${c.configsGenerated ? 'x' : ' '}] ${l === 'zh' ? 'configs 已生成' : 'configs generated'}`);
+  lines.push(`- [${c.manifestUpdated ? 'x' : ' '}] ${l === 'zh' ? 'manifest 已更新' : 'manifest updated'}`);
+  lines.push(`- [${c.wrappersSynced ? 'x' : ' '}] ${l === 'zh' ? 'wrappers 已同步' : 'wrappers synced'}`);
+  lines.push(`- [${c.skillRetentionReviewed ? 'x' : ' '}] ${l === 'zh' ? '技能保留已确认' : 'skill retention reviewed'}`);
+  lines.push(`- [${c.userApproved ? 'x' : ' '}] ${l === 'zh' ? '用户确认（完成）' : 'User approved (complete)'}`);
+  lines.push('');
+
+  // Next steps
+  lines.push(`### ${i18n.labels.nextSteps}`);
+  if (stage === 'A') {
+    if (!a.validated) {
+      lines.push(l === 'zh'
+        ? `- 编辑 \`${docsRel}\` 下的 4 份文档（先用模板起草）`
+        : `- Edit the 4 Stage A docs under \`${docsRel}\` (start from templates)`
+      );
+      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs check-docs --repo-root .')}\``);
+    } else if (!a.userApproved) {
+      lines.push(l === 'zh'
+        ? '- 请用户审阅 Stage A 文档，确认后运行：'
+        : '- Ask the user to review Stage A docs, then run:'
+      );
+      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs approve --stage A --repo-root .')}\``);
+    }
+  } else if (stage === 'B') {
+    if (!b.validated) {
+      lines.push(l === 'zh'
+        ? `- 编辑 \`${bpRel}\`（从 Stage A 映射关键决策）`
+        : `- Edit \`${bpRel}\` (map key decisions from Stage A)`
+      );
+      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs validate --repo-root .')}\``);
+      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs suggest-packs --repo-root .')}\``);
+    } else if (!b.userApproved) {
+      lines.push(l === 'zh'
+        ? '- 请用户审阅蓝图，确认后运行：'
+        : '- Ask the user to review the blueprint, then run:'
+      );
+      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs approve --stage B --repo-root .')}\``);
+    }
+  } else if (stage === 'C') {
+    if (!c.wrappersSynced) {
+      lines.push(l === 'zh'
+        ? '- 运行 apply（会生成 scaffold + configs + manifest + wrappers）：'
+        : '- Run apply (scaffold + configs + manifest + wrappers):'
+      );
+      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs apply --providers both --require-stage-a --repo-root .')}\``);
+    } else if (!c.skillRetentionReviewed) {
+      lines.push(l === 'zh'
+        ? '- 复核需要保留/删除的技能，然后标记已复核：'
+        : '- Review which skills to keep/prune, then mark reviewed:'
+      );
+      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs review-skill-retention --repo-root .')}\``);
+    } else if (!c.userApproved) {
+      lines.push(l === 'zh'
+        ? '- 请用户确认初始化完成，确认后运行：'
+        : '- Ask the user to confirm initialization complete, then run:'
+      );
+      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs approve --stage C --repo-root .')}\``);
+    }
+  } else if (stage === 'complete') {
+    lines.push(l === 'zh' ? '- 初始化已完成。' : '- Initialization complete.');
+  }
+
+  lines.push('');
+  lines.push(`- \`${toPosixPath('node init/_tools/init.mjs update-board --apply --repo-root .')}\``);
+
+  return lines.join('\n') + '\n';
+}
+
+function renderStartHeereBlueprintDigest(lang, blueprintRel, blueprint, blueprintError) {
+  const i18n = getStartHeereI18n(lang);
+  const l = normalizeLang(lang);
+
+  if (blueprintError) {
+    const msg = blueprintError && blueprintError.message ? blueprintError.message : String(blueprintError);
+    return (l === 'zh'
+      ? `蓝图读取失败：\`${blueprintRel}\`\n\n错误：\`${escapeMarkdownTableCell(msg)}\`\n`
+      : `Failed to read blueprint: \`${blueprintRel}\`\n\nError: \`${escapeMarkdownTableCell(msg)}\`\n`
+    );
+  }
+
+  if (!blueprint) {
+    return `${i18n.labels.noBlueprint}\n`;
+  }
+
+  const keyPaths = [
+    'project.name',
+    'project.description',
+    'project.domain',
+    'repo.layout',
+    'repo.language',
+    'repo.packageManager',
+    'capabilities.frontend.enabled',
+    'capabilities.frontend.framework',
+    'capabilities.backend.enabled',
+    'capabilities.backend.framework',
+    'capabilities.api.style',
+    'capabilities.api.auth',
+    'capabilities.database.enabled',
+    'capabilities.database.kind',
+    'skills.packs'
+  ];
+
+  const keyRows = [];
+  const keyPathSet = new Set(keyPaths);
+  for (const kp of keyPaths) {
+    const v = getAtPath(blueprint, kp);
+    if (v === undefined || v === '') continue;
+    let rendered = stringifyForTable(v);
+    if (Array.isArray(v)) rendered = v.join(', ');
+    keyRows.push([`\`${kp}\``, escapeMarkdownTableCell(rendered)]);
+  }
+
+  const lines = [];
+  lines.push(l === 'zh' ? '### 关键决策（流程强相关）' : '### Key decisions (flow-critical)');
+  lines.push('');
+  if (keyRows.length === 0) {
+    lines.push(l === 'zh' ? '(暂无关键字段)' : '(no key fields yet)');
+  } else {
+    lines.push(l === 'zh' ? '| 字段 | 值 |' : '| Field | Value |');
+    lines.push('|---|---|');
+    for (const [k, v] of keyRows) {
+      lines.push(`| ${k} | ${v} |`);
+    }
+  }
+  lines.push('');
+
+  // Fallback (schema-like) fields: show everything else, folded.
+  const flat = flattenObject(blueprint);
+  const extraEntries = Object.entries(flat)
+    .filter(([k]) => !keyPathSet.has(k))
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  lines.push('<details>');
+  lines.push(`<summary>${l === 'zh' ? '其余字段（折叠，类 schema 展示）' : 'Other fields (folded, schema-like view)'}</summary>`);
+  lines.push('');
+  if (extraEntries.length === 0) {
+    lines.push(l === 'zh' ? '(无额外字段)' : '(no extra fields)');
+  } else {
+    lines.push(l === 'zh' ? '| 路径 | 值 |' : '| Path | Value |');
+    lines.push('|---|---|');
+    for (const [k, v] of extraEntries) {
+      const vv = escapeMarkdownTableCell(stringifyForTable(v));
+      lines.push(`| \`${escapeMarkdownTableCell(k)}\` | ${vv} |`);
+    }
+  }
+  lines.push('');
+  lines.push('</details>');
+  lines.push('');
+  lines.push(l === 'zh'
+    ? `蓝图位置：\`${blueprintRel}\``
+    : `Blueprint path: \`${blueprintRel}\``
+  );
+  lines.push('');
+
+  return lines.join('\n') + '\n';
+}
+
+function renderStartHeereInterviewOutline(lang, repoRoot, docsRoot, blueprintPath) {
+  const l = normalizeLang(lang);
+  const qbank = toPosixPath('init/_tools/skills/initialize-project-from-requirements/templates/conversation-prompts.md');
+  const intake = '`init/START-HERE.md`';
+  const docsRel = docsRoot ? toRelDirForBoard(repoRoot, docsRoot) : toPosixPath(STAGE_A_DOCS_DEFAULT_REL) + '/';
+  const bpRel = blueprintPath ? toRelPathForBoard(repoRoot, blueprintPath) : toPosixPath(BLUEPRINT_DEFAULT_REL);
+
+  const lines = [];
+  if (l === 'zh') {
+    lines.push(`- 阶段 A 前：在 ${intake} 记录工作约定/资料登记/要点（LLM 维护），确认后进入阶段 A`);
+    lines.push(`- 阶段 A：用问题库 \`${qbank}\` 做访谈，把答案写入 \`${docsRel}\`，然后运行 \`check-docs\``);
+    lines.push(`- 阶段 B：把阶段 A 决策映射到 \`${bpRel}\`，运行 \`validate\`，必要时 \`suggest-packs\``);
+    lines.push('- 阶段 C：运行 `apply` 生成 scaffold + wrappers，复核技能保留并 `review-skill-retention`，最后 `approve --stage C`');
+  } else {
+    lines.push(`- Pre-Stage A: record Working Agreement / Materials / Notes in ${intake} (LLM-maintained), then confirm to enter Stage A`);
+    lines.push(`- Stage A: use the question bank \`${qbank}\`, write answers into \`${docsRel}\`, then run \`check-docs\``);
+    lines.push(`- Stage B: map Stage A decisions into \`${bpRel}\`, run \`validate\`, optionally \`suggest-packs\``);
+    lines.push('- Stage C: run `apply` to generate scaffold + wrappers, review retention via `review-skill-retention`, then `approve --stage C`');
+  }
+  return lines.join('\n') + '\n';
+}
+
+function generateStartHeereDoc({ lang, stage, manualBlocks }) {
+  const l = normalizeLang(lang);
+  const i18n = getStartHeereI18n(l);
+  const now = new Date().toISOString();
+
+  const stageValue = String(stage || '').trim() || 'pre';
+
+  const header = [
+    `language: ${l} # zh | en`,
+    `stage: ${stageValue} # auto`,
+    `lastUpdated: ${now} # auto`,
+    '',
+    '<!--',
+    ...i18n.metaNote.split('\n').map((line) => line.trimEnd()),
+    '-->',
+    '',
+    `# ${i18n.title}`,
+    ''
+  ];
+
+  const parts = [];
+  parts.push(header.join('\n'));
+
+  parts.push(`## ${i18n.sections.snapshot}`);
+  parts.push(renderStartHeereBlock(START_HERE_BLOCK_TYPE_PRIMARY, 'SNAPSHOT', manualBlocks.SNAPSHOT));
+  parts.push('');
+
+  parts.push(`## ${i18n.sections.workingAgreement}`);
+  parts.push(renderStartHeereBlock(START_HERE_BLOCK_TYPE_PRIMARY, 'WORKING_AGREEMENT', manualBlocks.WORKING_AGREEMENT));
+  parts.push('');
+
+  parts.push(`## ${i18n.sections.materials}`);
+  parts.push(renderStartHeereBlock(START_HERE_BLOCK_TYPE_PRIMARY, 'MATERIALS_REGISTER', manualBlocks.MATERIALS_REGISTER));
+  parts.push('');
+
+  parts.push(`## ${i18n.sections.notes}`);
+  parts.push(renderStartHeereBlock(START_HERE_BLOCK_TYPE_PRIMARY, 'PRE_STAGE_A_NOTES', manualBlocks.PRE_STAGE_A_NOTES));
+  parts.push('');
+
+  parts.push(`## ${i18n.sections.next}`);
+  parts.push(l === 'zh'
+    ? '- 生成看板：`init/INIT-BOARD.md`'
+    : '- Generated board: `init/INIT-BOARD.md`'
+  );
+
+  let content = parts.join('\n');
+  content = content.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+
+  return content;
+}
+
+function updateStartHeereDoc({ repoRoot, docsRoot, blueprintPath, intakePath, sourcePath, apply }) {
+  const targetPath = intakePath || path.join(repoRoot, START_HERE_DEFAULT_REL);
+
+  const existingPath =
+    fs.existsSync(targetPath)
+      ? targetPath
+      : (sourcePath && fs.existsSync(sourcePath) ? sourcePath : null);
+  const existing = existingPath ? fs.readFileSync(existingPath, 'utf8') : null;
+  const lang = existing ? parseStartHeereLanguage(existing) : 'en';
+  const stage = (loadState(repoRoot) || {}).stage || 'pre';
+
+  const manualBlockIds = ['SNAPSHOT', 'WORKING_AGREEMENT', 'MATERIALS_REGISTER', 'PRE_STAGE_A_NOTES'];
+
+  const defaultsEn = getStartHeereManualDefaults('en');
+  const defaultsZh = getStartHeereManualDefaults('zh');
+  const defaults = getStartHeereManualDefaults(lang);
+
+  const manualBlocks = {};
+  for (const id of manualBlockIds) {
+    const extracted = existing ? extractStartHeereBlockInnerAnyType(existing, id) : null;
+    if (!extracted) {
+      manualBlocks[id] = defaults[id];
+      continue;
+    }
+
+    // If the user only has the template placeholder and they switched languages, swap the placeholder too.
+    const swapToDefaults =
+      (lang === 'zh' && isSameMeaningfulContent(extracted, defaultsEn[id])) ||
+      (lang === 'en' && isSameMeaningfulContent(extracted, defaultsZh[id]));
+
+    manualBlocks[id] = swapToDefaults ? defaults[id] : extracted;
+  }
+
+  const content = generateStartHeereDoc({ lang, stage, manualBlocks });
+
+  if (!apply) {
+    return { ok: true, op: 'write', path: targetPath, mode: 'dry-run' };
+  }
+
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(targetPath, content, 'utf8');
+  return { ok: true, op: 'write', path: targetPath, mode: 'applied' };
+}
+
+function getInitBoardI18n(lang) {
+  const l = normalizeLang(lang);
+  if (l === 'zh') {
+    return {
+      title: '初始化看板',
+      metaNote: [
+        '自动生成文件，请勿手改。',
+        '',
+        '说明：',
+        '- 入口：init/START-HERE.md（LLM 维护）',
+        '- 刷新：大多数流水线命令会隐式刷新本文件',
+        '- 手动（兜底）：',
+        '  node init/_tools/init.mjs update-board --apply --repo-root .',
+        '',
+        '安全门禁：',
+        '- 阶段推进前必须用户明确同意；不要在用户未确认时运行 approve --stage <A|B|C>。'
+      ].join('\n'),
+      sections: {
+        routing: '路由地图（自动）',
+        board: '进度看板（自动）',
+        blueprint: '蓝图摘要（自动）',
+        outline: '访谈大纲（自动）'
+      }
+    };
+  }
+
+  return {
+    title: 'INIT BOARD',
+    metaNote: [
+      'AUTO-GENERATED FILE. DO NOT EDIT.',
+      '',
+      'Notes:',
+      '- Intake doc: init/START-HERE.md (LLM-maintained)',
+      '- Refresh: most pipeline commands implicitly refresh this file',
+      '- Manual (fallback):',
+      '  node init/_tools/init.mjs update-board --apply --repo-root .',
+      '',
+      'Safety gate:',
+      '- Stage transitions require explicit user approval. Do not run approve --stage <A|B|C> without the user confirming.'
+    ].join('\n'),
+    sections: {
+      routing: 'Routing Map (AUTO)',
+      board: 'Progress Board (AUTO)',
+      blueprint: 'Blueprint Digest (AUTO)',
+      outline: 'Interview Outline (AUTO)'
+    }
+  };
+}
+
+function renderLegacyWorkdirNotice(lang, { repoRoot, docsRoot, blueprintPath, statePath }) {
+  const l = normalizeLang(lang);
+  const diag = detectWorkdirMode(repoRoot, docsRoot, blueprintPath, statePath);
+  if (diag.legacyUsed.length === 0) return '';
+
+  const paths = diag.legacyUsed.map((p) => `\`${p}\``).join('、');
+  const cmd = 'node init/_tools/init.mjs migrate-workdir --apply --repo-root .';
+
+  if (l === 'zh') {
+    return [
+      '> [!WARNING]',
+      `> 检测到你正在使用旧版 init 工作目录路径：${paths}。`,
+      '> 建议迁移到 `init/_work/`：',
+      `> \`${cmd}\``
+    ].join('\n');
+  }
+
+  return [
+    '> [!WARNING]',
+    `> Legacy init workdir path(s) detected: ${diag.legacyUsed.map((p) => `\`${p}\``).join(', ')}.`,
+    '> Recommended migration into `init/_work/`:',
+    `> \`${cmd}\``
+  ].join('\n');
+}
+
+function generateInitBoardDoc({ lang, repoRoot, statePath, docsRoot, state, blueprintPath, blueprint, blueprintError }) {
+  const l = normalizeLang(lang);
+  const i18n = getInitBoardI18n(l);
+  const now = new Date().toISOString();
+  const blueprintRel = toRelPathForBoard(repoRoot, blueprintPath);
+
+  const header = [
+    `language: ${l} # zh | en`,
+    `lastUpdated: ${now} # auto`,
+    '',
+    '<!--',
+    ...i18n.metaNote.split('\n').map((line) => line.trimEnd()),
+    '-->',
+    '',
+    `# ${i18n.title}`,
+    ''
+  ];
+
+  const parts = [];
+  parts.push(header.join('\n'));
+
+  parts.push(`## ${i18n.sections.routing}`);
+  const legacyNotice = renderLegacyWorkdirNotice(l, { repoRoot, docsRoot, blueprintPath, statePath });
+  if (legacyNotice) {
+    parts.push(legacyNotice.trimEnd());
+    parts.push('');
+  }
+  parts.push(renderStartHeereRoutingMap(l, { repoRoot, statePath, docsRoot, blueprintPath }).trimEnd());
+  parts.push('');
+
+  parts.push(`## ${i18n.sections.board}`);
+  parts.push(renderStartHeereProgressBoard(l, state, repoRoot, docsRoot, blueprintPath).trimEnd());
+  parts.push('');
+
+  parts.push(`## ${i18n.sections.blueprint}`);
+  parts.push(renderStartHeereBlueprintDigest(l, blueprintRel, blueprint, blueprintError).trimEnd());
+  parts.push('');
+
+  parts.push(`## ${i18n.sections.outline}`);
+  parts.push(renderStartHeereInterviewOutline(l, repoRoot, docsRoot, blueprintPath).trimEnd());
+
+  let content = parts.join('\n');
+  content = content.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+  return content;
+}
+
+function updateInitBoardDoc({ repoRoot, docsRoot, blueprintPath, boardPath, apply }) {
+  const targetPath = boardPath || path.join(repoRoot, INIT_BOARD_DEFAULT_REL);
+
+  // Language is sourced from the intake doc if possible.
+  let lang = 'en';
+  const startHerePath = path.join(repoRoot, START_HERE_DEFAULT_REL);
+  const startHeereLegacyPath = path.join(repoRoot, START_HEERE_LEGACY_REL);
+  if (fs.existsSync(startHerePath)) {
+    lang = parseStartHeereLanguage(fs.readFileSync(startHerePath, 'utf8'));
+  } else if (fs.existsSync(startHeereLegacyPath)) {
+    lang = parseStartHeereLanguage(fs.readFileSync(startHeereLegacyPath, 'utf8'));
+  } else if (fs.existsSync(targetPath)) {
+    lang = parseStartHeereLanguage(fs.readFileSync(targetPath, 'utf8'));
+  }
+
+  const statePath = getStatePath(repoRoot);
+  const state = loadState(repoRoot);
+
+  let blueprint = null;
+  let blueprintError = null;
+  if (fs.existsSync(blueprintPath)) {
+    const read = tryReadJson(blueprintPath);
+    if (read.ok) blueprint = read.value;
+    else blueprintError = read.error;
+  }
+
+  const content = generateInitBoardDoc({
+    lang,
+    repoRoot,
+    statePath,
+    docsRoot,
+    state,
+    blueprintPath,
+    blueprint,
+    blueprintError
+  });
+
+  if (!apply) return { ok: true, op: 'write', path: targetPath, mode: 'dry-run' };
+
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(targetPath, content, 'utf8');
+  return { ok: true, op: 'write', path: targetPath, mode: 'applied' };
+}
+
+function tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath) {
+  try {
+    // Keep the intake doc in a consistent shape (preserve LLM blocks; migrate legacy name if needed).
+    const startHerePath = path.join(repoRoot, START_HERE_DEFAULT_REL);
+    const startHeereLegacyPath = path.join(repoRoot, START_HEERE_LEGACY_REL);
+
+    if (!fs.existsSync(startHerePath) && fs.existsSync(startHeereLegacyPath)) {
+      try {
+        fs.renameSync(startHeereLegacyPath, startHerePath);
+      } catch (e) {
+        // Fall back to copy-on-write via updateStartHeereDoc (preserves LLM blocks).
+        console.warn(`[warn] Failed to migrate legacy START-HEERE.md -> START-HERE.md: ${e.message}`);
+      }
+    }
+
+    const sourcePath = !fs.existsSync(startHerePath) && fs.existsSync(startHeereLegacyPath) ? startHeereLegacyPath : null;
+    updateStartHeereDoc({ repoRoot, docsRoot, blueprintPath, intakePath: startHerePath, sourcePath, apply: true });
+
+    const res = updateInitBoardDoc({
+      repoRoot,
+      docsRoot,
+      blueprintPath,
+      boardPath: path.join(repoRoot, INIT_BOARD_DEFAULT_REL),
+      apply: true
+    });
+    if (res && res.mode === 'applied') {
+      console.log(`[auto] INIT-BOARD updated: ${path.relative(repoRoot, res.path || '')}`);
+    }
+  } catch (e) {
+    console.warn(`[warn] Failed to auto-update INIT-BOARD: ${e.message}`);
+  }
 }
 
 // ============================================================================
@@ -519,13 +1507,14 @@ function packPrefixMap() {
   return {
     workflows: 'workflows/',
     standards: 'standards/',
+    testing: 'testing/',
     backend: 'backend/',
     frontend: 'frontend/'
   };
 }
 
 function packOrder() {
-  return ['workflows', 'standards', 'backend', 'frontend'];
+  return ['workflows', 'standards', 'testing', 'backend', 'frontend'];
 }
 
 function normalizePackList(packs) {
@@ -583,6 +1572,10 @@ function validateBlueprint(blueprint) {
   if (skills.packs && !Array.isArray(skills.packs)) errors.push('skills.packs must be an array of strings when present.');
 
   const packs = normalizePackList(skills.packs || []);
+  const known = packPrefixMap();
+  for (const p of packs) {
+    if (!known[p]) warnings.push(`skills.packs includes unknown pack "${p}". It will be ignored by manifest update unless a prefix mapping exists.`);
+  }
   if (!packs.includes('workflows')) warnings.push('skills.packs does not include "workflows". This is usually required.');
   if (!packs.includes('standards')) warnings.push('skills.packs does not include "standards". This is usually recommended.');
 
@@ -593,9 +1586,11 @@ function validateBlueprint(blueprint) {
 function recommendedPacksFromBlueprint(blueprint) {
   const rec = new Set(['workflows', 'standards']);
   const caps = blueprint.capabilities || {};
+  const quality = blueprint.quality || {};
 
   if (caps.backend && caps.backend.enabled) rec.add('backend');
   if (caps.frontend && caps.frontend.enabled) rec.add('frontend');
+  if (quality.testing && quality.testing.enabled) rec.add('testing');
 
   // Optional packs can be added explicitly via blueprint.skills.packs.
 
@@ -632,6 +1627,83 @@ function printResult(result, format) {
   }
 }
 
+const HTML_TAG_NAMES = new Set([
+  'a',
+  'blockquote',
+  'br',
+  'code',
+  'details',
+  'div',
+  'em',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'hr',
+  'img',
+  'kbd',
+  'li',
+  'ol',
+  'p',
+  'pre',
+  'small',
+  'span',
+  'strong',
+  'sub',
+  'summary',
+  'sup',
+  'table',
+  'tbody',
+  'td',
+  'th',
+  'thead',
+  'tr',
+  'ul'
+]);
+
+function isMarkdownAutolinkAngle(inner) {
+  const v = inner.trim();
+  if (!v) return false;
+  const lower = v.toLowerCase();
+  if (lower.startsWith('http://') || lower.startsWith('https://')) return true;
+  if (lower.startsWith('mailto:')) return true;
+  if (lower.startsWith('tel:')) return true;
+  // CommonMark also supports <email@domain> autolinks.
+  if (!/\s/.test(v) && v.includes('@')) return true;
+  return false;
+}
+
+function isHtmlTagAngle(inner) {
+  let v = inner.trim();
+  if (!v) return false;
+  if (v.startsWith('!--')) return true; // <!-- ... -->
+  if (v.startsWith('?xml')) return true;
+  if (v.startsWith('!doctype')) return true;
+
+  // Normalize forms like </tag>, <tag/>, <tag ...>, <tag .../>
+  if (v.startsWith('/')) v = v.slice(1).trim();
+  if (v.endsWith('/')) v = v.slice(0, -1).trim();
+
+  const m = v.match(/^([a-zA-Z][a-zA-Z0-9-]*)\b/);
+  if (!m) return false;
+  const tag = m[1].toLowerCase();
+  return HTML_TAG_NAMES.has(tag);
+}
+
+function findAngleBracketTemplatePlaceholders(content) {
+  const hits = [];
+  const re = /<([^>\n]{1,80})>/g;
+  for (const match of content.matchAll(re)) {
+    const inner = match[1] ?? '';
+    if (isMarkdownAutolinkAngle(inner)) continue;
+    if (isHtmlTagAngle(inner)) continue;
+    hits.push(match[0]);
+  }
+  return hits;
+}
+
 function checkDocs(docsRoot) {
   const errors = [];
   const warnings = [];
@@ -644,7 +1716,6 @@ function checkDocs(docsRoot) {
   ];
 
   const placeholderPatterns = [
-    { re: /<[^>\n]{1,80}>/g, msg: 'template placeholder "<...>"' },
     { re: /^\s*[-*]\s*\.\.\.\s*$/gm, msg: 'placeholder bullet "- ..."' },
     { re: /:\s*\.\.\.\s*$/gm, msg: 'placeholder value ": ..."' }
   ];
@@ -661,6 +1732,11 @@ function checkDocs(docsRoot) {
       if (!content.includes(needle)) {
         errors.push(`${spec.name} is missing required section/heading: "${needle}"`);
       }
+    }
+
+    const anglePlaceholders = findAngleBracketTemplatePlaceholders(content);
+    if (anglePlaceholders.length > 0) {
+      errors.push(`${spec.name} still contains template placeholder "<...>". Replace all template placeholders.`);
     }
 
     for (const pat of placeholderPatterns) {
@@ -752,7 +1828,9 @@ function generateProjectReadme(repoRoot, blueprint, apply) {
   conditionalBlock('IS_PYTHON', 'true', isPython);
   conditionalBlock('IS_GO', 'true', isGo);
 
-  const hasInitKit = fs.existsSync(path.join(repoRoot, 'init', '.init-kit'));
+  const hasInitKit =
+    fs.existsSync(path.join(repoRoot, INIT_KIT_MARKER_DEFAULT_REL)) ||
+    fs.existsSync(path.join(repoRoot, INIT_KIT_MARKER_LEGACY_REL));
   conditionalBlock('HAS_INIT_KIT', 'true', hasInitKit);
   
   // Install and dev commands based on package manager
@@ -995,6 +2073,16 @@ function planScaffold(repoRoot, blueprint, apply) {
   if (layout === 'monorepo') {
     results.push(ensureDir(path.join(repoRoot, 'apps'), apply));
     results.push(ensureDir(path.join(repoRoot, 'packages'), apply));
+    results.push(writeFileIfMissing(
+      path.join(repoRoot, 'apps', 'README.md'),
+      '# Apps\n\nApp entry points for this monorepo.\n',
+      apply
+    ));
+    results.push(writeFileIfMissing(
+      path.join(repoRoot, 'packages', 'README.md'),
+      '# Packages\n\nShared packages/libraries for this monorepo.\n',
+      apply
+    ));
 
     if (caps.frontend && caps.frontend.enabled) {
       results.push(ensureDir(path.join(repoRoot, 'apps', 'frontend'), apply));
@@ -1014,15 +2102,23 @@ function planScaffold(repoRoot, blueprint, apply) {
       ));
     }
 
-    // Shared packages are optional, but commonly needed
-    results.push(ensureDir(path.join(repoRoot, 'packages', 'shared'), apply));
-    results.push(writeFileIfMissing(
-      path.join(repoRoot, 'packages', 'shared', 'README.md'),
-      '# Shared package\n\nThis folder is a scaffold placeholder for shared types/utilities.\n',
-      apply
-    ));
+    // Shared packages reduce clutter when there is only a single app.
+    const needsSharedPackage = !!(caps.frontend && caps.frontend.enabled) && !!(caps.backend && caps.backend.enabled);
+    if (needsSharedPackage) {
+      results.push(ensureDir(path.join(repoRoot, 'packages', 'shared'), apply));
+      results.push(writeFileIfMissing(
+        path.join(repoRoot, 'packages', 'shared', 'README.md'),
+        '# Shared package\n\nThis folder is a scaffold placeholder for shared types/utilities.\n',
+        apply
+      ));
+    }
   } else {
     results.push(ensureDir(path.join(repoRoot, 'src'), apply));
+    results.push(writeFileIfMissing(
+      path.join(repoRoot, 'src', 'README.md'),
+      '# src\n\nApplication source code.\n',
+      apply
+    ));
 
     if (caps.frontend && caps.frontend.enabled) {
       results.push(ensureDir(path.join(repoRoot, 'src', 'frontend'), apply));
@@ -1149,6 +2245,19 @@ function copyFile(src, dest, apply) {
   }
 }
 
+function movePath(src, dest, apply) {
+  if (!fs.existsSync(src)) return { op: 'mv', src, dest, mode: 'skip', reason: 'missing source' };
+  if (fs.existsSync(dest)) return { op: 'mv', src, dest, mode: 'skip', reason: 'destination exists' };
+  if (!apply) return { op: 'mv', src, dest, mode: 'dry-run' };
+  try {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.renameSync(src, dest);
+    return { op: 'mv', src, dest, mode: 'applied' };
+  } catch (e) {
+    return { op: 'mv', src, dest, mode: 'failed', error: e.message };
+  }
+}
+
 function archiveInitArtifacts(repoRoot, docsRoot, blueprintPath, options, apply) {
   const targetRoot = resolvePath(repoRoot, (options && options.archiveDir) || path.join('docs', 'project', 'overview'));
   const actions = [];
@@ -1190,10 +2299,12 @@ function archiveInitArtifacts(repoRoot, docsRoot, blueprintPath, options, apply)
 
 function cleanupInit(repoRoot, apply) {
   const initDir = path.join(repoRoot, 'init');
-  const marker = path.join(initDir, '.init-kit');
+  const markerDefault = path.join(repoRoot, INIT_KIT_MARKER_DEFAULT_REL);
+  const markerLegacy = path.join(repoRoot, INIT_KIT_MARKER_LEGACY_REL);
+  const marker = fs.existsSync(markerDefault) ? markerDefault : (fs.existsSync(markerLegacy) ? markerLegacy : null);
 
   if (!fs.existsSync(initDir)) return { op: 'skip', path: initDir, reason: 'init/ not present' };
-  if (!fs.existsSync(marker)) return { op: 'refuse', path: initDir, reason: 'missing init/.init-kit marker' };
+  if (!marker) return { op: 'refuse', path: initDir, reason: 'missing init/_tools/.init-kit marker' };
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const trashDir = path.join(repoRoot, `.init-trash-${ts}`);
@@ -1223,8 +2334,13 @@ function main() {
   const format = (opts['format'] || 'text').toLowerCase();
 
   const repoRoot = path.resolve(opts['repo-root'] || process.cwd());
-  const blueprintPath = resolvePath(repoRoot, opts['blueprint'] || path.join('init', 'project-blueprint.json'));
-  const docsRoot = resolvePath(repoRoot, opts['docs-root'] || path.join('init', 'stage-a-docs'));
+  const docsRoot = resolveDocsRoot(repoRoot, opts['docs-root']);
+  const blueprintPath = resolveBlueprintPath(repoRoot, opts['blueprint']);
+  const statePath = getStatePath(repoRoot);
+
+  if (command !== 'migrate-workdir') {
+    warnLegacyWorkdirIfNeeded(repoRoot, docsRoot, blueprintPath, statePath);
+  }
 
   // ========== start ==========
   if (command === 'start') {
@@ -1241,9 +2357,10 @@ function main() {
 
     const existingState = loadState(repoRoot);
     if (existingState) {
+      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
       console.log('[info] Existing init state detected');
-      printStatus(existingState, repoRoot);
-      console.log('[info] To restart, delete init/.init-state.json first');
+      printStatus(existingState, repoRoot, { docsRoot, blueprintPath });
+      console.log(`[info] To restart, delete ${toPosixPath(path.relative(repoRoot, statePath))} first`);
       process.exit(0);
     }
 
@@ -1251,8 +2368,9 @@ function main() {
     addHistoryEvent(state, 'init_started', 'Initialization started');
     saveState(repoRoot, state);
 
-    console.log('[ok] Init state created: init/.init-state.json');
-    printStatus(state, repoRoot);
+    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
+    console.log(`[ok] Init state created: ${toPosixPath(path.relative(repoRoot, statePath))}`);
+    printStatus(state, repoRoot, { docsRoot, blueprintPath });
     process.exit(0);
   }
 
@@ -1268,9 +2386,123 @@ function main() {
     if (format === 'json') {
       console.log(JSON.stringify(getStageProgress(state), null, 2));
     } else {
-      printStatus(state, repoRoot);
+      printStatus(state, repoRoot, { docsRoot, blueprintPath });
     }
     process.exit(0);
+  }
+
+  // ========== migrate-workdir ==========
+  if (command === 'migrate-workdir') {
+    const apply = !!opts['apply'];
+
+    const legacyState = path.join(repoRoot, LEGACY_INIT_STATE_REL);
+    const legacyDocs = path.join(repoRoot, LEGACY_STAGE_A_DOCS_REL);
+    const legacyBlueprint = path.join(repoRoot, LEGACY_BLUEPRINT_REL);
+
+    const modernState = path.join(repoRoot, INIT_STATE_DEFAULT_REL);
+    const modernDocs = path.join(repoRoot, STAGE_A_DOCS_DEFAULT_REL);
+    const modernBlueprint = path.join(repoRoot, BLUEPRINT_DEFAULT_REL);
+
+    const actions = [
+      movePath(legacyState, modernState, apply),
+      movePath(legacyDocs, modernDocs, apply),
+      movePath(legacyBlueprint, modernBlueprint, apply)
+    ];
+
+    const failed = actions.filter((a) => a.mode === 'failed');
+
+    if (format === 'json') {
+      console.log(JSON.stringify({ ok: failed.length === 0, actions }, null, 2));
+    } else {
+      const label = apply ? '[ok]' : '[plan]';
+      console.log(`${label} migrate-workdir (${apply ? 'apply' : 'dry-run'})`);
+      for (const a of actions) {
+        const srcRel = toPosixPath(path.relative(repoRoot, a.src || ''));
+        const destRel = toPosixPath(path.relative(repoRoot, a.dest || ''));
+        const mode = a.mode ? ` (${a.mode})` : '';
+        const reason = a.reason ? ` [${a.reason}]` : '';
+        const err = a.error ? ` [error: ${a.error}]` : '';
+        console.log(`- ${a.op}: ${srcRel} -> ${destRel}${mode}${reason}${err}`);
+      }
+    }
+
+    if (apply && failed.length === 0) {
+      const nextDocsRoot = resolveDocsRoot(repoRoot, null);
+      const nextBlueprintPath = resolveBlueprintPath(repoRoot, null);
+      tryAutoUpdateInitBoardDoc(repoRoot, nextDocsRoot, nextBlueprintPath);
+    }
+
+    process.exit(failed.length === 0 ? 0 : 1);
+  }
+
+  // ========== update-intake ==========
+  if (command === 'update-intake') {
+    const apply = !!opts['apply'];
+    const intakePath = resolvePath(repoRoot, opts['path'] || START_HERE_DEFAULT_REL);
+    const startHerePath = path.join(repoRoot, START_HERE_DEFAULT_REL);
+    const startHeereLegacyPath = path.join(repoRoot, START_HEERE_LEGACY_REL);
+    const sourcePath =
+      !fs.existsSync(intakePath) && intakePath === startHerePath && fs.existsSync(startHeereLegacyPath)
+        ? startHeereLegacyPath
+        : null;
+
+    const res = updateStartHeereDoc({
+      repoRoot,
+      docsRoot,
+      blueprintPath,
+      intakePath,
+      sourcePath,
+      apply
+    });
+
+    if (apply && res.ok) {
+      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
+    }
+
+    if (format === 'json') {
+      console.log(JSON.stringify(res, null, 2));
+    } else {
+      const rel = toPosixPath(path.relative(repoRoot, res.path || intakePath));
+      console.log(apply ? `[ok] START-HERE updated: ${rel}` : `[plan] START-HERE update planned (dry-run): ${rel}`);
+    }
+    process.exit(res.ok ? 0 : 1);
+  }
+
+  // ========== update-board ==========
+  if (command === 'update-board') {
+    const apply = !!opts['apply'];
+    const boardPath = resolvePath(repoRoot, opts['path'] || INIT_BOARD_DEFAULT_REL);
+
+    if (apply) {
+      const startHerePath = path.join(repoRoot, START_HERE_DEFAULT_REL);
+      const startHeereLegacyPath = path.join(repoRoot, START_HEERE_LEGACY_REL);
+      if (!fs.existsSync(startHerePath) && fs.existsSync(startHeereLegacyPath)) {
+        try {
+          fs.renameSync(startHeereLegacyPath, startHerePath);
+        } catch (e) {
+          console.warn(`[warn] Failed to migrate legacy START-HEERE.md -> START-HERE.md: ${e.message}`);
+        }
+      }
+      const sourcePath =
+        !fs.existsSync(startHerePath) && fs.existsSync(startHeereLegacyPath) ? startHeereLegacyPath : null;
+      updateStartHeereDoc({ repoRoot, docsRoot, blueprintPath, intakePath: startHerePath, sourcePath, apply: true });
+    }
+
+    const res = updateInitBoardDoc({
+      repoRoot,
+      docsRoot,
+      blueprintPath,
+      boardPath,
+      apply
+    });
+
+    if (format === 'json') {
+      console.log(JSON.stringify(res, null, 2));
+    } else {
+      const rel = toPosixPath(path.relative(repoRoot, res.path || boardPath));
+      console.log(apply ? `[ok] INIT-BOARD updated: ${rel}` : `[plan] INIT-BOARD update planned (dry-run): ${rel}`);
+    }
+    process.exit(res.ok ? 0 : 1);
   }
 
   // ========== advance ==========
@@ -1288,9 +2520,9 @@ function main() {
       }
       console.log('\n== Stage A -> B Checkpoint ==\n');
       console.log('Stage A docs validated.');
-      console.log('Confirm the user reviewed and approved docs under init/stage-a-docs/.');
+      console.log(`Confirm the user reviewed and approved docs under ${toPosixPath(path.relative(repoRoot, docsRoot))}/`);
       console.log('\nIf confirmed, run the following to approve and advance:');
-      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs approve --stage A');
+      console.log('  node init/_tools/init.mjs approve --stage A');
       process.exit(0);
     }
 
@@ -1300,9 +2532,9 @@ function main() {
       }
       console.log('\n== Stage B -> C Checkpoint ==\n');
       console.log('Stage B blueprint validated.');
-      console.log('Confirm the user reviewed and approved init/project-blueprint.json.');
+      console.log(`Confirm the user reviewed and approved ${toPosixPath(path.relative(repoRoot, blueprintPath))}.`);
       console.log('\nIf confirmed, run the following to approve and advance:');
-      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs approve --stage B');
+      console.log('  node init/_tools/init.mjs approve --stage B');
       process.exit(0);
     }
 
@@ -1315,21 +2547,27 @@ function main() {
         console.log('Scaffold and skill wrappers are generated.');
         console.log('Before approving Stage C, review which skills to keep vs prune.');
         console.log('\nWhen done, mark review complete by running:');
-        console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs review-skill-retention');
+        console.log('  node init/_tools/init.mjs review-skill-retention');
         process.exit(0);
       }
 
       console.log('\n== Stage C Completion Checkpoint ==\n');
       console.log('Scaffold and skill packs applied.');
       console.log('Confirm the user reviewed the initialization result.');
+      console.log('\n[IMPORTANT] Root docs updated from blueprint:');
+      console.log('- AGENTS.md: Project Type, Tech Stack, Key Directories');
+      console.log('- README.md: Title, description, tech stack, structure');
+      console.log('\nPlease verify:');
+      console.log('- AGENTS.md "Project Type" shows your project name (NOT "Template repository")');
+      console.log('- Tech Stack and Key Directories match your blueprint choices');
       console.log('\nIf confirmed, run the following to finish initialization:');
-      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs approve --stage C');
+      console.log('  node init/_tools/init.mjs approve --stage C');
       console.log('\nNext steps:');
-      console.log('- Review: README.md and AGENTS.md');
+      console.log('- Review: README.md and AGENTS.md (verify project-specific content)');
       console.log('- Optional: regenerate root docs:');
-      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs update-root-docs --apply');
+      console.log('  node init/_tools/init.mjs update-root-docs --apply');
       console.log('- Optional: archive and remove init/:');
-      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs cleanup-init --apply --i-understand --archive');
+      console.log('  node init/_tools/init.mjs cleanup-init --apply --i-understand --archive');
       process.exit(0);
     }
 
@@ -1363,10 +2601,11 @@ function main() {
       state.stage = 'B';
       addHistoryEvent(state, 'stage_a_approved', 'User approved Stage A, advancing to Stage B');
       saveState(repoRoot, state);
+      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
       
       console.log('[ok] Stage A approved');
       console.log('[ok] Advanced to Stage B - Blueprint');
-      console.log('\nNext: create init/project-blueprint.json');
+      console.log(`\nNext: create ${toPosixPath(path.relative(repoRoot, blueprintPath))}`);
       process.exit(0);
     }
 
@@ -1382,6 +2621,7 @@ function main() {
       state.stage = 'C';
       addHistoryEvent(state, 'stage_b_approved', 'User approved Stage B, advancing to Stage C');
       saveState(repoRoot, state);
+      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
       
       console.log('[ok] Stage B approved');
       console.log('[ok] Advanced to Stage C - Scaffold');
@@ -1404,6 +2644,7 @@ function main() {
       state.stage = 'complete';
       addHistoryEvent(state, 'stage_c_approved', 'User approved Stage C, initialization complete');
       saveState(repoRoot, state);
+      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
       
       console.log('[ok] Stage C approved');
       console.log('[ok] Initialization complete!');
@@ -1412,21 +2653,26 @@ function main() {
       const agentDir = path.join(repoRoot, '.ai', 'skills', 'workflows', 'agent');
       if (fs.existsSync(agentDir)) {
         console.log('\n[info] Agent Builder pack detected');
-        console.log('- Found: .ai/skills/workflows/agent');
-        console.log('- If not needed, remove it to reduce repo size and sync time:');
-        console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs prune-agent-builder --repo-root . --apply --i-understand');
-      }
+      console.log('- Found: .ai/skills/workflows/agent');
+      console.log('- If not needed, remove it to reduce repo size and sync time:');
+      console.log('  node init/_tools/init.mjs prune-agent-builder --repo-root . --apply --i-understand');
+    }
+      
+      console.log('\n[IMPORTANT] Root docs have been updated from the blueprint:');
+      console.log('- AGENTS.md: Project Type, Tech Stack, Key Directories');
+      console.log('- README.md: Title, description, tech stack, structure');
+      console.log('Please verify these files contain project-specific content.');
       
       console.log('\nNext steps:');
-      console.log('- Review: README.md and AGENTS.md');
+      console.log('- Verify: AGENTS.md shows your project info (not "Template repository")');
       console.log('- Optional: archive and remove init/:');
-      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs cleanup-init --apply --i-understand --archive');
+      console.log('  node init/_tools/init.mjs cleanup-init --apply --i-understand --archive');
       process.exit(0);
     }
   }
 
   if (command === 'validate') {
-    const blueprint = readJson(blueprintPath);
+    const blueprint = readBlueprintOrDie(repoRoot, blueprintPath);
     const v = validateBlueprint(blueprint);
 
     // Auto-update state if validation passes
@@ -1450,6 +2696,7 @@ function main() {
         ? `[ok] Blueprint is valid: ${path.relative(repoRoot, blueprintPath)}`
         : `[error] Blueprint validation failed: ${path.relative(repoRoot, blueprintPath)}`
     };
+    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
     printResult(result, format);
     process.exit(v.ok ? 0 : 1);
   }
@@ -1474,18 +2721,45 @@ function main() {
           glossary: fs.existsSync(path.join(docsRoot, 'domain-glossary.md')),
           riskQuestions: fs.existsSync(path.join(docsRoot, 'risk-open-questions.md'))
         };
+        // The pipeline is file-based; treat a validated Stage A as "must-ask answered".
+        // This keeps the board/status verifiable without requiring manual state edits.
+        const stageA = state[stageKey('A')] || {};
+        const mustAsk = stageA.mustAsk || {};
+        const reqRel = toPosixPath(path.relative(repoRoot, path.join(docsRoot, 'requirements.md')));
+        const nfrRel = toPosixPath(path.relative(repoRoot, path.join(docsRoot, 'non-functional-requirements.md')));
+        const writtenToByKey = {
+          onePurpose: reqRel,
+          userRoles: reqRel,
+          mustRequirements: reqRel,
+          outOfScope: reqRel,
+          userJourneys: reqRel,
+          constraints: nfrRel,
+          successMetrics: reqRel
+        };
+        for (const key of Object.keys(mustAsk)) {
+          const prev = mustAsk[key] && typeof mustAsk[key] === 'object' ? mustAsk[key] : {};
+          mustAsk[key] = {
+            ...prev,
+            asked: true,
+            answered: true,
+            writtenTo: prev.writtenTo || writtenToByKey[key] || reqRel
+          };
+        }
+        stageA.mustAsk = mustAsk;
+        state[stageKey('A')] = stageA;
         addHistoryEvent(state, 'stage_a_validated', 'Stage A docs validated');
         saveState(repoRoot, state);
         console.log('[auto] State updated: stage-a.validated = true');
       }
     }
 
+    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
     printResult({ ok, errors: res.errors, warnings: res.warnings, summary }, format);
     process.exit(ok ? 0 : 1);
   }
 
   if (command === 'suggest-packs') {
-    const blueprint = readJson(blueprintPath);
+    const blueprint = readBlueprintOrDie(repoRoot, blueprintPath);
 
     const v = validateBlueprint(blueprint);
     const rec = recommendedPacksFromBlueprint(blueprint);
@@ -1518,13 +2792,25 @@ function main() {
       result.summary += `\n[write] Added missing recommended packs into blueprint.skills.packs`;
     }
 
+    if (v.ok) {
+      const state = loadState(repoRoot);
+      if (state && state.stage === 'B') {
+        state[stageKey('B')].drafted = true;
+        state[stageKey('B')].packsReviewed = true;
+        addHistoryEvent(state, 'stage_b_packs_reviewed', 'Stage B packs reviewed via suggest-packs');
+        saveState(repoRoot, state);
+        console.log('[auto] State updated: stage-b.packsReviewed = true');
+      }
+    }
+
+    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
     printResult(result, format);
     process.exit(v.ok ? 0 : 1);
   }
 
   if (command === 'scaffold') {
     const apply = !!opts['apply'];
-    const blueprint = readJson(blueprintPath);
+    const blueprint = readBlueprintOrDie(repoRoot, blueprintPath);
 
     const v = validateBlueprint(blueprint);
     if (!v.ok) die('[error] Blueprint is not valid; refusing to scaffold.');
@@ -1544,12 +2830,17 @@ function main() {
         console.log(`- ${item.op}: ${path.relative(repoRoot, item.path || '')}${mode}${reason}`);
       }
     }
+
+    if (apply) {
+      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
+    }
     process.exit(0);
   }
 
   if (command === 'apply') {
     const providers = opts['providers'] || 'both';
-    const requireStageA = !!opts['require-stage-a'];
+    const requireStageA = !!opts['require-stage-a'] || !!opts['require-stage-a-strict'];
+    const requireStageAStrict = !!opts['require-stage-a-strict'];
     const skipConfigs = !!opts['skip-configs'];
     const skipReadme = !!opts['skip-readme'];
     const skipRootAgents = !!opts['skip-root-agents'];
@@ -1570,17 +2861,32 @@ function main() {
       console.warn('[warn] Archive flags are ignored without --cleanup-init');
     }
 
-    const blueprint = readJson(blueprintPath);
+    const blueprint = readBlueprintOrDie(repoRoot, blueprintPath);
 
     // Validate blueprint
     const v = validateBlueprint(blueprint);
     if (!v.ok) die('[error] Blueprint validation failed. Fix errors and re-run.');
 
-    // Stage A docs check (strict only when explicitly required)
+    // Stage A docs check (optional gating)
     const docsCheckRes = checkDocs(docsRoot);
     if (requireStageA) {
-      const strictOk = docsCheckRes.ok && docsCheckRes.warnings.length === 0;
-      if (!strictOk) die('[error] Stage A docs check failed in strict mode. Fix docs and re-run.');
+      const ok = docsCheckRes.ok && (!requireStageAStrict || docsCheckRes.warnings.length === 0);
+      if (!ok) {
+        const docsRel = toPosixPath(path.relative(repoRoot, docsRoot));
+        const cmd = [
+          'node init/_tools/init.mjs check-docs',
+          `--docs-root ${docsRel}`,
+          requireStageAStrict ? '--strict' : null
+        ].filter(Boolean).join(' ');
+        die(
+          [
+            requireStageAStrict
+              ? '[error] Stage A docs check failed in strict mode. Fix docs and re-run.'
+              : '[error] Stage A docs check failed. Fix docs and re-run.',
+            `[hint] Run: ${cmd}`
+          ].join('\n')
+        );
+      }
     }
 
     // Suggest packs (warn-only)
@@ -1594,6 +2900,12 @@ function main() {
 
     // Scaffold directories
     const scaffoldPlan = planScaffold(repoRoot, blueprint, true);
+    console.log('[ok] Scaffold updated.');
+    for (const item of scaffoldPlan) {
+      const mode = item.mode ? ` (${item.mode})` : '';
+      const reason = item.reason ? ` [${item.reason}]` : '';
+      console.log(`  - ${item.op}: ${path.relative(repoRoot, item.path || '')}${mode}${reason}`);
+    }
 
     // Generate config files (default: enabled)
     let configResults = [];
@@ -1658,6 +2970,10 @@ function main() {
       console.log('[auto] State updated: stage-c.* = true');
     }
 
+    if (!cleanup) {
+      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
+    }
+
     // Optional cleanup
     let archiveResult = null;
     let cleanupResult = null;
@@ -1709,8 +3025,21 @@ function main() {
       if (pruneResult) console.log(`- Agent workflow prune: ${pruneResult.mode}`);
       console.log(`- Wrappers synced via: ${syncResult.cmd || '(skipped)'}`);
       if (cleanupResult) console.log(`- init/ cleanup: ${cleanupResult.mode}`);
+      
+      // Explicit prompt about root docs updates
+      if (readmeResult || agentsResult) {
+        console.log('\n[IMPORTANT] Root docs updated from blueprint:');
+        if (readmeResult && readmeResult.op === 'write') {
+          console.log('- README.md: project title, description, tech stack, structure');
+        }
+        if (agentsResult && agentsResult.op === 'write') {
+          console.log('- AGENTS.md: Project Type, Tech Stack, Key Directories');
+        }
+        console.log('Please verify these contain project-specific content (not template placeholders).');
+      }
+      
       console.log('\nNext:');
-      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs advance');
+      console.log('  node init/_tools/init.mjs advance');
     }
 
     process.exit(0);
@@ -1779,13 +3108,14 @@ function main() {
     state[stageKey('C')].skillRetentionReviewed = true;
     addHistoryEvent(state, 'stage_c_skill_retention_reviewed', 'Skill retention reviewed');
     saveState(repoRoot, state);
+    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
 
     if (format === 'json') {
       console.log(JSON.stringify({ ok: true, stage: 'C', skillRetentionReviewed: true }, null, 2));
     } else {
       console.log('[ok] Stage C skill retention review marked as complete.');
       console.log('Next:');
-      console.log('  node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs advance');
+      console.log('  node init/_tools/init.mjs advance');
     }
 
     process.exit(0);
@@ -1797,7 +3127,7 @@ function main() {
     const skipReadme = !!opts['skip-readme'];
     const skipRootAgents = !!opts['skip-root-agents'];
 
-    const blueprint = readJson(blueprintPath);
+    const blueprint = readBlueprintOrDie(repoRoot, blueprintPath);
     const v = validateBlueprint(blueprint);
     if (!v.ok) die('[error] Blueprint validation failed. Fix errors and re-run.');
 
@@ -1815,6 +3145,21 @@ function main() {
       console.log(apply ? '[ok] Root docs updated.' : '[plan] Root docs update planned (dry-run).');
       console.log(`- README.md: ${readmeResult.mode || readmeResult.reason || readmeResult.op}`);
       console.log(`- AGENTS.md: ${agentsResult.mode || agentsResult.reason || agentsResult.op}`);
+      
+      if (apply) {
+        console.log('\n[IMPORTANT] Updated sections from blueprint:');
+        if (readmeResult.op === 'write') {
+          console.log('- README.md: project title, description, tech stack, structure');
+        }
+        if (agentsResult.op === 'write') {
+          console.log('- AGENTS.md: Project Type, Tech Stack, Key Directories');
+        }
+        console.log('Please verify these contain project-specific content (not "Template repository").');
+      }
+    }
+
+    if (apply) {
+      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
     }
 
     process.exit(0);

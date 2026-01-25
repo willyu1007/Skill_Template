@@ -12,18 +12,23 @@ A starter kit for creating LLM-optimized codebases with Single Source of Truth (
 ## What's Inside
 
 ```
-init/                      # START HERE
-|-- README.md              # Template overview & quick start
-|-- AGENTS.md              # AI initialization instructions
-`-- INITIALIZATION.md      # Detailed field reference
+init/                      # Bootstrap init kit
+|-- README.md              # Human guide (commands + flow)
+|-- AGENTS.md              # LLM init instructions
+|-- _tools/                # Pipeline + templates + checklists
+|   `-- init.mjs            # Command shortcut
+|-- _work/                 # Stage A/B workspace + runtime state
+|   `-- AGENTS.md          # Workspace rules (LLM)
+|-- START-HERE.md          # Generated on start (LLM intake; do not hand-edit outside LLM blocks)
+`-- INIT-BOARD.md          # Generated on start (routing + progress; do not edit)
 
 .ai/skills/                # SSOT for skills (incl. workflows)
 .ai/scripts/               # Sync scripts
 .ai/llm-config/            # LLM governance entry + registries (providers/profiles/prompts/config)
 
 dev-docs/                  # Development documentation
-|-- README.md              # Dev Docs Pattern guide
-|-- active/                # Current tasks
+|-- AGENTS.md              # Dev docs workflow + decision gate
+|-- active/                # Active tasks
 `-- archive/               # Completed tasks
 
 .codex/skills/             # Codex skill entry stubs
@@ -39,8 +44,6 @@ dev-docs/                  # Development documentation
 ## Documentation
 
 - [Initialization Guide](init/README.md)
-- [Dev Docs Pattern](dev-docs/README.md)
+- [Dev Docs Pattern](dev-docs/AGENTS.md)
 - [Documentation Guidelines](.ai/skills/standards/documentation-guidelines/SKILL.md)
 - [Naming Conventions](.ai/skills/standards/naming-conventions/SKILL.md)
-
-

@@ -4,11 +4,53 @@
 
 A **3-stage, verifiable** pipeline for initializing projects from requirements.
 
+## Command Shortcut
+
+Use `node init/_tools/init.mjs <cmd>` instead of the full path:
+
+```bash
+# Short form (recommended)
+node init/_tools/init.mjs start
+node init/_tools/init.mjs check-docs
+node init/_tools/init.mjs apply --providers both
+
+# Full path (equivalent)
+node init/_tools/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs <cmd>
+```
+
+## Start Here
+
+- Intake doc (generated on `start`; LLM-maintained blocks): `init/START-HERE.md`
+- Generated board (generated on `start`): `init/INIT-BOARD.md`
+- Manual refresh: `node init/_tools/init.mjs update-board --apply`
+
 | Stage | Output | Verification |
 |-------|--------|--------------|
-| **A** | Requirement docs in `init/stage-a-docs/` | `check-docs` |
-| **B** | Blueprint at `init/project-blueprint.json` | `validate` |
+| **A** | Requirement docs in `init/_work/stage-a-docs/` | `check-docs` |
+| **B** | Blueprint at `init/_work/project-blueprint.json` | `validate` |
 | **C** | Scaffold + skill wrappers | `apply` |
+
+### Flow Diagram
+
+```mermaid
+flowchart TD
+    Start["start"] --> StageA["Stage A: Requirements"]
+    StageA --> CheckDocs["check-docs"]
+    CheckDocs -->|PASS| ApproveA["approve --stage A"]
+    CheckDocs -->|FAIL| FixA["Fix docs"]
+    FixA --> CheckDocs
+    ApproveA --> StageB["Stage B: Blueprint"]
+    StageB --> Validate["validate"]
+    Validate -->|PASS| ApproveB["approve --stage B"]
+    Validate -->|FAIL| FixB["Fix blueprint"]
+    FixB --> Validate
+    ApproveB --> StageC["Stage C: Scaffold"]
+    StageC --> Apply["apply --providers both"]
+    Apply --> Review["review-skill-retention"]
+    Review --> ApproveC["approve --stage C"]
+    ApproveC --> Done["Initialization Complete"]
+    Done -.-> Cleanup["cleanup-init --archive"]
+```
 
 ## Quick Start
 
@@ -20,63 +62,71 @@ Ask your LLM to follow `init/AGENTS.md`.
 
 ```bash
 # 1. Initialize templates and state
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs start
+node init/_tools/init.mjs start
 
 # 2. Edit Stage A docs, then validate
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs check-docs
+node init/_tools/init.mjs check-docs
 
 # 3. Approve Stage A
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs approve --stage A
+node init/_tools/init.mjs approve --stage A
 
 # 4. Edit blueprint, then validate
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs validate
+node init/_tools/init.mjs validate
 
 # 5. Approve Stage B
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs approve --stage B
+node init/_tools/init.mjs approve --stage B
 
 # 6. Apply scaffold and wrappers
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs apply --providers both
+node init/_tools/init.mjs apply --providers both
 
 # 7. Review skill retention (required before Stage C approval)
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs review-skill-retention
+node init/_tools/init.mjs review-skill-retention
 
 # 8. (Optional) Re-generate root README.md + AGENTS.md from blueprint
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs update-root-docs --apply
+node init/_tools/init.mjs update-root-docs --apply
 
 # 9. Complete initialization
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs approve --stage C
+node init/_tools/init.mjs approve --stage C
 ```
 
 ## Documentation
 
 | File | Purpose |
 |------|---------|
-| `AGENTS.md` | LLM instructions (main entry point) |
-| `reference.md` | Redirect to the “Reference” section in this README |
-| `stages/` | Stage-specific checklists |
-| `skills/.../SKILL.md` | Full skill documentation |
+| `_tools/init.mjs` | Command shortcut (use instead of full path) |
+| `_work/` | Init workspace: state + Stage A docs + blueprint |
+| `_tools/` | Init tools: pipeline + templates + checklists |
+| `START-HERE.md` | Intake doc (LLM-maintained) |
+| `INIT-BOARD.md` | Generated board (routing + kanban + digest) |
+| `AGENTS.md` | LLM instructions |
+
+## Migrating From Legacy Outputs
+
+```bash
+node init/_tools/init.mjs migrate-workdir --apply
+```
 
 ## Post-init Cleanup
 
 ```bash
 # Optional: remove agent-builder if not needed
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs prune-agent-builder --apply --i-understand
+node init/_tools/init.mjs prune-agent-builder --apply --i-understand
 
 # Optional: archive and remove init kit
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs cleanup-init --apply --i-understand --archive
+node init/_tools/init.mjs cleanup-init --apply --i-understand --archive
 ```
 
 ## Reference
 
 ### Conclusions (read first)
 
-- Stage A produces **human-readable SSOT** for intent under `init/stage-a-docs/` (archive to `docs/project/overview/` after init if needed; override with `--archive-dir`).
-- Stage B produces **machine-readable SSOT** for automation: `init/project-blueprint.json`.
+- Stage A produces **human-readable SSOT** for intent under `init/_work/stage-a-docs/` (archive to `docs/project/overview/` after init if needed; override with `--archive-dir`).
+- Stage B produces **machine-readable SSOT** for automation: `init/_work/project-blueprint.json`.
 - Stage C is deterministic:
   - scaffold directories based on `repo.layout` and enabled capabilities
   - update `.ai/skills/_meta/sync-manifest.json` (based on `skills.packs`)
   - regenerate provider wrappers by running `node .ai/scripts/sync-skills.mjs --scope current --providers both --mode reset --yes`
-- The init kit is bootstrap-only. You may remove `init/` after success (guarded by `init/.init-kit`).
+- The init kit is bootstrap-only. You may remove `init/` after success (guarded by `init/_tools/.init-kit`).
 
 ### 1. Definitions
 
@@ -86,177 +136,54 @@ node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs 
 
 ### 2. Command Reference
 
-#### 2.1 `start`
+All commands: `node init/_tools/init.mjs <cmd> [options]`
 
-Initialize state file and create template files.
+| Command | Purpose | Key Options |
+|---------|---------|-------------|
+| `start` | Initialize state + templates | |
+| `status` | Show progress | |
+| `check-docs` | Validate Stage A docs | `--strict` |
+| `validate` | Validate blueprint | |
+| `suggest-packs` | Recommend skill packs | `--write` |
+| `approve` | Advance stage | `--stage A\|B\|C` |
+| `scaffold` | Dry-run scaffold | |
+| `apply` | Apply scaffold + wrappers | `--providers both`, `--skip-agent-builder` |
+| `review-skill-retention` | Mark retention reviewed | |
+| `update-root-docs` | Regenerate README/AGENTS | `--apply` |
+| `prune-agent-builder` | Remove agent workflow | `--apply --i-understand` |
+| `cleanup-init` | Remove init kit | `--apply --i-understand --archive` |
+| `migrate-workdir` | Migrate legacy paths | `--apply` |
+| `update-board` | Refresh INIT-BOARD.md | `--apply` |
 
-```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs start --repo-root .
-```
+For full option details, run: `node init/_tools/init.mjs --help`
 
-Creates:
-- `init/.init-state.json` - state tracking file
-- `init/stage-a-docs/*.md` - Stage A document templates
-- `init/project-blueprint.json` - Stage B blueprint template
+### 3. Validation & Mapping
 
-#### 2.2 `status`
+**`check-docs` validates:**
+- Required files exist (4 docs in `stage-a-docs/`)
+- Required headings present
+- No template placeholders (`<name>`, `- ...`, `: ...`)
 
-Show current initialization progress.
+**`check-docs` does NOT validate:** business correctness, edge case coverage, or realistic NFR targets.
 
-```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs status --repo-root .
-```
-
-#### 2.3 `check-docs`
-
-Validate Stage A documents.
-
-```bash
-# Normal mode
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs check-docs
-
-# Strict mode (treats warnings as errors)
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs check-docs --strict
-```
-
-#### 2.4 `validate`
-
-Validate Stage B blueprint.
-
-```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs validate
-```
-
-#### 2.5 `suggest-packs`
-
-Recommend skill packs based on blueprint capabilities.
-
-```bash
-# Warn-only (default)
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs suggest-packs
-
-# Auto-add missing recommended packs
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs suggest-packs --write
-```
-
-#### 2.6 `approve`
-
-Approve current stage and advance to next stage.
-
-```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs approve --stage A
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs approve --stage B
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs approve --stage C
-```
-
-#### 2.7 `scaffold`
-
-Dry-run scaffold plan.
-
-```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs scaffold
-```
-
-#### 2.8 `apply`
-
-Apply scaffold + manifest update + wrapper sync.
-
-```bash
-# Standard apply
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs apply --providers both
-
-# With agent-builder removal
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs apply --providers both --skip-agent-builder --i-understand
-```
-
-#### 2.9 `review-skill-retention`
-
-Mark skill retention as reviewed (required before approving Stage C).
-
-```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs review-skill-retention --repo-root .
-```
-
-#### 2.10 `update-root-docs`
-
-(Re)generate root docs from the blueprint.
-
-```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs update-root-docs --apply
-```
-
-#### 2.11 `prune-agent-builder`
-
-Remove `.ai/skills/workflows/agent` after initialization.
-
-```bash
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs prune-agent-builder --apply --i-understand
-```
-
-#### 2.12 `cleanup-init`
-
-Remove the init kit (optionally archive to `docs/project/overview/` first).
-
-```bash
-# Dry-run
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs cleanup-init --i-understand
-
-# Apply with archive
-node init/skills/initialize-project-from-requirements/scripts/init-pipeline.mjs cleanup-init --apply --i-understand --archive
-```
-
-### 3. Stage A validation details
-
-#### 3.1 What `check-docs` validates (MUST)
-
-Given `--docs-root <path>` (default: `init/stage-a-docs`), it checks:
-
-- All required files exist:
-  - `requirements.md`
-  - `non-functional-requirements.md`
-  - `domain-glossary.md`
-  - `risk-open-questions.md`
-- Each file contains minimum required headings.
-- No template placeholders remain (e.g., `<name>`, `- ...`, `: ...`).
-
-#### 3.2 What `check-docs` does NOT validate
-
-- Whether requirements are "correct" or "complete" for the business.
-- Whether acceptance criteria cover all edge cases.
-- Whether NFR targets are realistic.
-
-#### 3.3 Strict mode
-
-- `--strict` treats **warnings** (TBD/TODO markers) as failures.
-
-### 4. Requirements → Blueprint mapping
-
-#### 4.1 Mapping principles (MUST)
-
-- Blueprint encodes **decisions needed for scaffolding and pack selection only**.
-- Do not encode implementation details unless they are hard constraints.
-- If undecided, record as TBD in `init/stage-a-docs/risk-open-questions.md`.
-
-#### 4.2 Blueprint fields that MUST be explicit
-
+**Blueprint required fields:**
 - `repo.layout`: `single` or `monorepo`
 - `repo.language`: primary language
-- `capabilities.frontend.enabled` and/or `capabilities.backend.enabled`
-- `skills.packs`: include at least `workflows`
+- `capabilities.frontend.enabled` / `capabilities.backend.enabled`
+- `skills.packs`: include at least `["workflows"]` (and usually `["standards"]`)
 
-### 5. Capabilities → Packs mapping
+### 4. Capabilities → Packs
 
-| Capability / intent | Suggested pack |
-|---|---|
+| Signal | Suggested pack |
+|--------|----------------|
 | always | `workflows` |
-| backend enabled | `backend` |
-| frontend enabled | `frontend` |
-| database enabled | `data` |
-| BPMN enabled | `diagrams` |
-| CI / containerize | `ops` |
+| always (recommended) | `standards` |
+| `capabilities.backend.enabled` | `backend` |
+| `capabilities.frontend.enabled` | `frontend` |
+| `quality.testing.enabled` | `testing` |
 
-### 6. Cleanup safety rules
+### 5. Cleanup safety
 
-- `cleanup-init` refuses to run unless `init/.init-kit` exists.
-- Use `--archive` to copy init inputs into `docs/project/overview/` before cleanup (or override with `--archive-dir`).
-- On some platforms, the script renames `init/` to `.init-trash-<timestamp>` before deletion.
+- Requires `init/_tools/.init-kit` marker
+- Use `--archive` to copy to `docs/project/overview/` first
+- Cross-platform: may rename to `.init-trash-<timestamp>` before deletion

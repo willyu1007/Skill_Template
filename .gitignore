@@ -15,6 +15,10 @@ CLAUDE.md
 # Temporary files
 .ai/.tmp/
 
+# Init runtime state (generated)
+init/_work/.init-state.json
+init/.init-state.json
+
 # Node
 node_modules/
 
