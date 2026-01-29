@@ -6,11 +6,15 @@ You are initializing a new project using the repository template.
 
 ## Conclusions (read first)
 
-- You MUST use the init entry docs:
-  - Intake doc: open `init/START-HERE.md` first (language + materials + running notes; LLM-maintained).
-  - Generated board: `init/INIT-BOARD.md` (routing + kanban + blueprint digest).
+- You MUST use the init entry docs (created after language is set):
+  - Intake doc: `init/START-HERE.md` (LLM-maintained blocks).
+  - INIT-BOARD: `init/INIT-BOARD.md` (LLM-owned; the pipeline updates only the `MACHINE_SNAPSHOT` block).
   - When the user provides new information, immediately record it into the LLM blocks in `init/START-HERE.md`.
-  - Ask the user to choose a working language (`zh` or `en`), record it in `init/START-HERE.md`.
+- Language gate (required before entry docs are created):
+  - Ask the user to choose one working language (free-form string).
+  - Run:
+    - `node init/_tools/init.mjs start --repo-root .`
+    - `node init/_tools/init.mjs set-language --language "<your language>" --repo-root .`
 - You MUST follow a **3-stage, file-based** pipeline:
   - **Stage A**: write requirement docs under `init/_work/stage-a-docs/`
   - **Stage B**: write blueprint at `init/_work/project-blueprint.json`
@@ -25,7 +29,7 @@ Use `init/_tools/skills/initialize-project-from-requirements/templates/conversat
 
 **Required inputs:**
 
-- working language (`zh` or `en`)
+- working language (free-form string)
 - one-line project purpose
 - primary user roles
 - in-scope MUST / out-of-scope OUT
@@ -43,11 +47,13 @@ If the user cannot decide, record TBD in `init/_work/stage-a-docs/risk-open-ques
 **Output:** `init/_work/stage-a-docs/` (4 docs)
 
 **Process:**
-1. Run `start` to create templates
-2. Interview user using conversation prompts
-3. Write docs from templates
-4. Validate: `check-docs`
-5. Get user approval → `approve --stage A`
+1. Ask user to choose one working language
+2. Run `start` to create templates
+3. Run `set-language` to write `state.language` and create `init/START-HERE.md` + `init/INIT-BOARD.md`
+4. Interview user using conversation prompts
+5. Write docs from templates
+6. Validate: `check-docs`
+7. Get user approval -> `approve --stage A`
 
 ## Stage B - Blueprint
 
@@ -57,16 +63,16 @@ If the user cannot decide, record TBD in `init/_work/stage-a-docs/risk-open-ques
 1. Convert Stage A into blueprint JSON
 2. Validate: `validate`
 3. Review packs: `suggest-packs`
-4. Get user approval → `approve --stage B`
+4. Get user approval -> `approve --stage B`
 
 ## Stage C - Scaffold + Skills
 
 **Process:**
 1. Dry-run: `scaffold`
 2. Apply: `apply --providers both --require-stage-a`
-3. Review skill retention → `review-skill-retention`
+3. Review skill retention -> `review-skill-retention`
 4. Verify root docs (`README.md`, `AGENTS.md`) are project-specific
-5. Get user approval → `approve --stage C`
+5. Get user approval -> `approve --stage C`
 6. Optional: `cleanup-init --apply --i-understand --archive`
 
 If user opts out of `agent-builder`, add `--skip-agent-builder --i-understand` to apply.

@@ -18,6 +18,10 @@
       "type": "integer",
       "const": 1
     },
+    "language": {
+      "type": ["string", "null"],
+      "description": "User-confirmed working language for init entry docs (free-form)."
+    },
     "stage": {
       "type": "string",
       "enum": ["A", "B", "C", "complete"],

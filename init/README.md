@@ -20,8 +20,11 @@ node init/_tools/skills/initialize-project-from-requirements/scripts/init-pipeli
 
 ## Start Here
 
-- Intake doc (generated on `start`; LLM-maintained blocks): `init/START-HERE.md`
-- Generated board (generated on `start`): `init/INIT-BOARD.md`
+- Language gate (required before entry docs exist):
+  - `node init/_tools/init.mjs start`
+  - `node init/_tools/init.mjs set-language --language "<your language>"`
+- Intake doc (created after language is set; LLM-maintained blocks): `init/START-HERE.md`
+- INIT-BOARD (LLM-owned; pipeline updates only the MACHINE_SNAPSHOT block): `init/INIT-BOARD.md`
 - Manual refresh: `node init/_tools/init.mjs update-board --apply`
 
 | Stage | Output | Verification |
@@ -41,7 +44,8 @@ flowchart TD
     FixA --> CheckDocs
     ApproveA --> StageB["Stage B: Blueprint"]
     StageB --> Validate["validate"]
-    Validate -->|PASS| ApproveB["approve --stage B"]
+    Validate -->|PASS| Packs["suggest-packs"]
+    Packs --> ApproveB["approve --stage B"]
     Validate -->|FAIL| FixB["Fix blueprint"]
     FixB --> Validate
     ApproveB --> StageC["Stage C: Scaffold"]
@@ -64,28 +68,34 @@ Ask your LLM to follow `init/AGENTS.md`.
 # 1. Initialize templates and state
 node init/_tools/init.mjs start
 
-# 2. Edit Stage A docs, then validate
+# 2. Set working language (creates init/START-HERE.md + init/INIT-BOARD.md)
+node init/_tools/init.mjs set-language --language "zh-CN"
+
+# 3. Edit Stage A docs, then validate
 node init/_tools/init.mjs check-docs
 
-# 3. Approve Stage A
+# 4. Approve Stage A
 node init/_tools/init.mjs approve --stage A
 
-# 4. Edit blueprint, then validate
+# 5. Edit blueprint, then validate
 node init/_tools/init.mjs validate
 
-# 5. Approve Stage B
+# 6. Review suggested packs (optional write)
+node init/_tools/init.mjs suggest-packs
+
+# 7. Approve Stage B
 node init/_tools/init.mjs approve --stage B
 
-# 6. Apply scaffold and wrappers
+# 8. Apply scaffold and wrappers
 node init/_tools/init.mjs apply --providers both
 
-# 7. Review skill retention (required before Stage C approval)
+# 9. Review skill retention (required before Stage C approval)
 node init/_tools/init.mjs review-skill-retention
 
-# 8. (Optional) Re-generate root README.md + AGENTS.md from blueprint
+# 10. (Optional) Re-generate root README.md + AGENTS.md from blueprint
 node init/_tools/init.mjs update-root-docs --apply
 
-# 9. Complete initialization
+# 11. Complete initialization
 node init/_tools/init.mjs approve --stage C
 ```
 
@@ -96,8 +106,8 @@ node init/_tools/init.mjs approve --stage C
 | `_tools/init.mjs` | Command shortcut (use instead of full path) |
 | `_work/` | Init workspace: state + Stage A docs + blueprint |
 | `_tools/` | Init tools: pipeline + templates + checklists |
-| `START-HERE.md` | Intake doc (LLM-maintained) |
-| `INIT-BOARD.md` | Generated board (routing + kanban + digest) |
+| `START-HERE.md` | Intake doc (LLM blocks; created after language is set) |
+| `INIT-BOARD.md` | INIT-BOARD (LLM-owned; pipeline updates only MACHINE_SNAPSHOT) |
 | `AGENTS.md` | LLM instructions |
 
 ## Migrating From Legacy Outputs
@@ -141,6 +151,7 @@ All commands: `node init/_tools/init.mjs <cmd> [options]`
 | Command | Purpose | Key Options |
 |---------|---------|-------------|
 | `start` | Initialize state + templates | |
+| `set-language` | Set working language (creates entry docs) | `--language "<any string>"` |
 | `status` | Show progress | |
 | `check-docs` | Validate Stage A docs | `--strict` |
 | `validate` | Validate blueprint | |
@@ -172,7 +183,7 @@ For full option details, run: `node init/_tools/init.mjs --help`
 - `capabilities.frontend.enabled` / `capabilities.backend.enabled`
 - `skills.packs`: include at least `["workflows"]` (and usually `["standards"]`)
 
-### 4. Capabilities → Packs
+### 4. Capabilities -> Packs
 
 | Signal | Suggested pack |
 |--------|----------------|

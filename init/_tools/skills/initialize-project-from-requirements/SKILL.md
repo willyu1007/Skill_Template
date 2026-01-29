@@ -43,7 +43,7 @@ Optional inputs:
 
 - Entry docs (human entry surface + generated routing):
   - `init/START-HERE.md` (intake doc; LLM-maintained blocks)
-  - `init/INIT-BOARD.md` (generated board; do not edit)
+  - `init/INIT-BOARD.md` (LLM-owned; pipeline updates only the `MACHINE_SNAPSHOT` block)
 - Stage A docs (created/updated by the authoring process):
   - `init/_work/stage-a-docs/requirements.md`
   - `init/_work/stage-a-docs/non-functional-requirements.md`
@@ -62,10 +62,16 @@ Optional inputs:
 
 ### Rule 0: Entry Docs
 
-- `init/START-HERE.md` is the **single intake surface** and should contain language + materials + running notes (LLM-maintained).
+- `init/START-HERE.md` is the **single intake surface** for progressive, user-friendly input capture and organization.
   - Only edit inside the `BEGIN LLM` / `END LLM` blocks.
-- `init/INIT-BOARD.md` is **auto-generated** (routing map + progress + blueprint digest). Do NOT edit it.
-- The board is refreshed implicitly by most init pipeline commands; use `update-board --apply` as the manual fallback.
+- **Language gate:** entry docs are created only after `init/_work/.init-state.json` has `language` set (free-form string).
+  - Ask the user to choose a working language, then run:
+    - `node init/_tools/init.mjs start --repo-root .`
+    - `node init/_tools/init.mjs set-language --language "<your language>" --repo-root .`
+- `init/INIT-BOARD.md` is **LLM-owned**. The pipeline updates ONLY the machine snapshot block:
+  - `<!-- INIT-BOARD:MACHINE_SNAPSHOT:START -->` ... `<!-- INIT-BOARD:MACHINE_SNAPSHOT:END -->`
+  - Do NOT edit inside those markers.
+- The machine snapshot is refreshed implicitly by every init pipeline command; use `update-board --apply` as the manual fallback.
 
 ### Rule 1: State Tracking
 
@@ -76,7 +82,8 @@ Optional inputs:
 - **Document existence fields** (`docsWritten`) are automatically updated when `check-docs` passes
 - **Approval fields** (`userApproved`) and **stage transitions** are updated via `approve --stage <A|B|C>` command
 - **Interview progress fields** (`stage-a.mustAsk.*`) are auto-marked complete when `check-docs` passes (Stage A validated).
-  - If you want `status` to reflect progress *during* the interview, you MAY update `init/_work/.init-state.json` incrementally, but it is optional.
+- LLM MUST NOT hand-edit `init/_work/.init-state.json` (except via the `set-language` command updating `language`).
+  - Use `init/START-HERE.md` LLM blocks for rolling notes and progress during the interview.
 - State file will be deleted when `cleanup-init` is run
 
 ### Rule 2: Mandatory Checkpoints
@@ -94,15 +101,19 @@ Optional inputs:
 
 ## Steps
 
-### Stage A: interview → requirement docs (verifiable)
+### Stage A: interview -> requirement docs (verifiable)
 
 1. **Initialize state**: Run `node init/_tools/init.mjs start` to create `init/_work/.init-state.json` and seed `init/_work/stage-a-docs/` + `init/_work/project-blueprint.json` templates.
 
-2. **Use the entry docs**: Open `init/START-HERE.md`, set `language: zh | en`, then (optionally) refresh the generated board at `init/INIT-BOARD.md`:
+2. **Set language (required before entry docs)**: Ask the user to choose a working language (free-form string), then run:
 
 ```bash
-node init/_tools/init.mjs update-board --apply --repo-root .
+node init/_tools/init.mjs set-language --language "<your language>" --repo-root .
+# Example:
+# node init/_tools/init.mjs set-language --language "zh-CN" --repo-root .
 ```
+
+This creates (copy-if-missing) `init/START-HERE.md` and `init/INIT-BOARD.md`.
 
 3. **Domain terminology alignment** (MUST ask, but completion is optional):
    - Ask the user: "Before we collect requirements, would you like to align on domain terminology first?"
@@ -113,7 +124,7 @@ node init/_tools/init.mjs update-board --apply --repo-root .
    - **If user chooses NO or LATER**:
      - Record the decision in `init/_work/stage-a-docs/domain-glossary.md` (for example: a short note `Status: deferred` or `No special terms yet`)
      - Continue to next step; if domain terms emerge during interview, prompt to add them to glossary
-   - Asking the question is **mandatory**, but completing the glossary is **optional** — user may skip if terminology is straightforward
+   - Asking the question is **mandatory**, but completing the glossary is **optional** - user may skip if terminology is straightforward
 
 4. Use `templates/conversation-prompts.md` to run a structured requirements interview.
 5. Confirm whether the heavy `agent-builder` workflow is needed; if not, plan to run Stage C with `--skip-agent-builder --i-understand`.
@@ -133,14 +144,14 @@ Use strict mode when you need a hard gate (CI / regulated workflows):
 node init/_tools/init.mjs check-docs --docs-root init/_work/stage-a-docs --strict
 ```
 
-10. **CHECKPOINT A→B**: Use prompt from `templates/stage-checkpoints.md` to request user approval.
+10. **CHECKPOINT A->B**: Use prompt from `templates/stage-checkpoints.md` to request user approval.
 11. Wait for explicit user approval, then run:
 
 ```bash
 node init/_tools/init.mjs approve --stage A
 ```
 
-### Stage B: requirements → blueprint (machine-readable)
+### Stage B: requirements -> blueprint (machine-readable)
 
 1. Create `init/_work/project-blueprint.json` based on the Stage A docs.
 2. Validate the blueprint:
@@ -162,7 +173,7 @@ node init/_tools/init.mjs suggest-packs   --blueprint init/_work/project-bluepri
 ```
 
 4. **Self-review**: Complete Stage B checklist in `templates/quality-checklist.md`.
-5. **CHECKPOINT B→C**: Use prompt from `templates/stage-checkpoints.md` to request user approval.
+5. **CHECKPOINT B->C**: Use prompt from `templates/stage-checkpoints.md` to request user approval.
 6. Wait for explicit user approval, then run:
 
 ```bash
@@ -232,7 +243,7 @@ node init/_tools/init.mjs cleanup-init   --repo-root .   --apply   --i-understan
 - Do not add provider-specific assumptions into Stage A docs or the blueprint.
 - Do not edit `.codex/skills/` or `.claude/skills/` directly. Only update SSOT in `.ai/skills/` and run `node .ai/scripts/sync-skills.mjs --scope current --providers both --mode reset --yes`. (The repo's SSOT rule applies.) 
 - Scaffolding MUST NOT overwrite existing files; scaffolding should only create missing directories and small placeholder `README.md` files.
-- **Exception**: The root `README.md` will be replaced with a project-specific version generated from the blueprint. The replacement is intentional — the template README should be replaced with project documentation.
+- **Exception**: The root `README.md` will be replaced with a project-specific version generated from the blueprint. The replacement is intentional - the template README should be replaced with project documentation.
 - The root `AGENTS.md` will be updated from the blueprint (project type, tech stack, key directories) during Stage C apply.
 
 ---
@@ -326,6 +337,8 @@ Stage C `apply` (and `update-root-docs`) updates the root `AGENTS.md` from the b
 ### Templates
 
 - `templates/conversation-prompts.md` - Question bank for Stage A interview
+- `templates/START-HERE.template.md` - Template for the intake doc `init/START-HERE.md` (LLM blocks)
+- `templates/INIT-BOARD.template.md` - Template for `init/INIT-BOARD.md` (LLM-owned; machine snapshot markers)
 - `templates/requirements.template.md` - Stage A requirements doc template
 - `templates/non-functional-requirements.template.md` - Stage A NFR doc template
 - `templates/domain-glossary.template.md` - Stage A glossary template

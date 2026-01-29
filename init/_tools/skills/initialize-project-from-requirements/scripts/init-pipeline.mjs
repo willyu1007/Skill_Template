@@ -10,6 +10,7 @@
  *
  * Commands:
  *   - start          Initialize state file and show next steps
+ *   - set-language   Set the working language in init state (free-form)
  *   - status         Show current initialization progress
  *   - advance        Check current stage completion and prompt for next stage
  *   - validate       Validate a blueprint JSON (no writes)
@@ -21,23 +22,24 @@
  *   - review-skill-retention  Mark Stage C skill retention as reviewed
  *   - migrate-workdir Move legacy init outputs into init/_work (optional)
  *   - update-intake  Update init/START-HERE.md (intake doc; LLM-maintained blocks)
- *   - update-board   Update init/INIT-BOARD.md (generated kanban + digest)
+ *   - update-board   Update init/INIT-BOARD.md (LLM-owned; pipeline updates only the machine snapshot block)
  *   - update-root-docs  Generate/update root README.md and AGENTS.md from the blueprint
  *
  * This script is intentionally framework-agnostic. It avoids generating code.
  *
  * Code Structure (for maintainers):
  * ---------------------------------
- *   Lines ~38-275:   Utilities & CLI (usage, parseArgs, file I/O helpers)
- *   Lines ~275-490:  State Management (loadState, saveState, getStageProgress)
- *   Lines ~490-1390: Entry Docs (START-HERE.md + INIT-BOARD.md generation, i18n)
- *   Lines ~1390-1500: Config Generation (template rendering, scaffold configs)
- *   Lines ~1500-1690: Blueprint & Packs (validation, pack mapping, suggestions)
- *   Lines ~1690-1760: Docs Validation (check-docs for Stage A)
- *   Lines ~1760-2020: Scaffold & Root Docs (README.md, AGENTS.md generation)
- *   Lines ~2020-2200: Init Templates & Manifest (template seeding, manifest update)
- *   Lines ~2200-2320: Cleanup & Archive (pruning, file operations, cleanup-init)
- *   Lines ~2320-EOF:  Main CLI (command dispatching and execution)
+ *   - Utilities & CLI: usage, parseArgs, file I/O helpers
+ *   - State management: init/_work/.init-state.json + progress calculations
+ *   - Entry docs:
+ *     - init/START-HERE.md is template-driven; preserves LLM blocks
+ *     - init/INIT-BOARD.md is LLM-owned; updates only MACHINE_SNAPSHOT block
+ *   - Docs validation: check-docs (Stage A)
+ *   - Blueprint & packs: validate + suggest-packs (Stage B)
+ *   - Scaffold + configs + docs: scaffold/apply/update-root-docs (Stage C)
+ *   - Manifest + wrappers: sync-manifest.json + sync-skills.mjs
+ *   - Cleanup & archive: cleanup-init, migrate-workdir
+ *   - Main CLI: command dispatch and execution
  *
  * Modularization Note:
  *   The script is intentionally kept as a single file for bootstrap simplicity.
@@ -65,6 +67,11 @@ Commands:
   start
     --repo-root <path>          Repo root (default: cwd)
     Initialize state file and show next steps.
+
+  set-language
+    --language <string>         Working language (free-form; required)
+    --repo-root <path>          Repo root (default: cwd)
+    Write state.language and (copy-if-missing) create entry docs.
 
   status
     --repo-root <path>          Repo root (default: cwd)
@@ -105,6 +112,7 @@ Commands:
   apply
     --blueprint <path>          Blueprint JSON path (default: <repo-root>/init/_work/project-blueprint.json)
     --repo-root <path>          Repo root (default: cwd)
+    --format <text|json>        Output format (default: text)
     --providers <both|codex|claude|codex,claude>
                                 Providers to sync (default: both)
     --require-stage-a           Run 'check-docs' and fail if it has errors
@@ -153,7 +161,7 @@ Commands:
     --docs-root <path>          Stage A docs root (default: <repo-root>/init/_work/stage-a-docs)
     --path <path>               Board doc path (default: <repo-root>/init/INIT-BOARD.md)
     --apply                      Actually write the board (default: dry-run)
-    Update the generated init board (routing map + kanban + blueprint digest).
+    Update init/INIT-BOARD.md by refreshing only its MACHINE_SNAPSHOT block (the rest is LLM-owned).
 
   update-root-docs
     --repo-root <path>          Repo root (default: cwd)
@@ -173,6 +181,7 @@ Commands:
 
 Examples:
   node init/_tools/init.mjs start
+  node init/_tools/init.mjs set-language --language "zh-CN"
   node init/_tools/init.mjs status
   node init/_tools/init.mjs check-docs --docs-root init/_work/stage-a-docs
   node init/_tools/init.mjs validate --blueprint init/_work/project-blueprint.json
@@ -263,7 +272,7 @@ function resolveInitStatePath(repoRoot) {
 function readJson(filePath) {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(raw);
+    return JSON.parse(stripUtf8Bom(raw));
   } catch (e) {
     die(`[error] Failed to read JSON: ${filePath}\n${e.message}`);
   }
@@ -327,6 +336,7 @@ function normalizeStateShape(state) {
 function createInitialState() {
   return {
     version: 1,
+    language: null,
     stage: 'A',
     createdAt: new Date().toISOString(),
     [stageKey('A')]: {
@@ -366,13 +376,30 @@ function createInitialState() {
   };
 }
 
+function normalizeLanguageValue(value) {
+  const v = String(value ?? '').trim();
+  return v ? v : null;
+}
+
+function getStateLanguage(state) {
+  if (!state || typeof state !== 'object') return null;
+  return normalizeLanguageValue(state.language);
+}
+
+function stripUtf8Bom(s) {
+  if (s == null) return '';
+  let str = String(s);
+  while (str.charCodeAt(0) === 0xfeff) str = str.slice(1);
+  return str;
+}
+
 function loadState(repoRoot) {
   const statePath = getStatePath(repoRoot);
   if (!fs.existsSync(statePath)) {
     return null;
   }
   try {
-    return normalizeStateShape(JSON.parse(fs.readFileSync(statePath, 'utf8')));
+    return normalizeStateShape(JSON.parse(stripUtf8Bom(fs.readFileSync(statePath, 'utf8'))));
   } catch (e) {
     console.error(`[warn] Failed to parse state file: ${e.message}`);
     return null;
@@ -434,77 +461,84 @@ function getStageProgress(state) {
 
 function printStatus(state, repoRoot, { docsRoot, blueprintPath } = {}) {
   const progress = getStageProgress(state);
+  const language = getStateLanguage(state);
+
   const stageNames = { A: 'Requirements', B: 'Blueprint', C: 'Scaffold', complete: 'Complete' };
   const docsRel = docsRoot ? toPosixPath(path.relative(repoRoot, docsRoot)) : toPosixPath(STAGE_A_DOCS_DEFAULT_REL);
   const bpRel = blueprintPath ? toPosixPath(path.relative(repoRoot, blueprintPath)) : toPosixPath(BLUEPRINT_DEFAULT_REL);
 
   console.log('');
-  console.log('┌─────────────────────────────────────────────────────────┐');
-  console.log('│  Init Status                                            │');
-  console.log('├─────────────────────────────────────────────────────────┤');
-  console.log(`│  Current stage: Stage ${progress.stage} - ${stageNames[progress.stage] || progress.stage}`);
-  console.log('│');
+  console.log('== Init Status ==');
+  console.log(`Current stage: ${progress.stage} - ${stageNames[progress.stage] || progress.stage}`);
+  console.log(`Language: ${language || '(not set)'}`);
+
+  if (!language) {
+    console.log('');
+    console.log('Entry docs (init/START-HERE.md, init/INIT-BOARD.md) are created only after language is set.');
+    console.log('Next:');
+    console.log('  node init/_tools/init.mjs set-language --language \"<your language>\" --repo-root .');
+  }
 
   if (progress.stage === 'A' || progress.stage === 'B' || progress.stage === 'C') {
-    console.log('│  Stage A Progress:');
-    console.log(`│    Must-ask: ${progress[stageKey('A')].mustAskAnswered}/${progress[stageKey('A')].mustAskTotal} complete`);
-    console.log(`│    Docs written: ${progress[stageKey('A')].docsWritten}/${progress[stageKey('A')].docsTotal} complete`);
-    console.log(`│    Validation: ${progress[stageKey('A')].validated ? '✓ validated' : '✗ not validated'}`);
-    console.log(`│    User approval: ${progress[stageKey('A')].userApproved ? '✓ approved' : '✗ not approved'}`);
+    console.log('');
+    console.log('Stage A:');
+    console.log(`  Must-ask: ${progress[stageKey('A')].mustAskAnswered}/${progress[stageKey('A')].mustAskTotal}`);
+    console.log(`  Docs written: ${progress[stageKey('A')].docsWritten}/${progress[stageKey('A')].docsTotal}`);
+    console.log(`  Validated: ${progress[stageKey('A')].validated ? 'yes' : 'no'}`);
+    console.log(`  User approved: ${progress[stageKey('A')].userApproved ? 'yes' : 'no'}`);
   }
 
   if (progress.stage === 'B' || progress.stage === 'C') {
-    console.log('│');
-    console.log('│  Stage B Progress:');
-    console.log(`│    Drafted: ${progress[stageKey('B')].drafted ? '✓' : '✗'}`);
-    console.log(`│    Validated: ${progress[stageKey('B')].validated ? '✓' : '✗'}`);
-    console.log(`│    Packs reviewed: ${progress[stageKey('B')].packsReviewed ? '✓' : '✗'}`);
-    console.log(`│    User approval: ${progress[stageKey('B')].userApproved ? '✓' : '✗'}`);
+    console.log('');
+    console.log('Stage B:');
+    console.log(`  Drafted: ${progress[stageKey('B')].drafted ? 'yes' : 'no'}`);
+    console.log(`  Validated: ${progress[stageKey('B')].validated ? 'yes' : 'no'}`);
+    console.log(`  Packs reviewed: ${progress[stageKey('B')].packsReviewed ? 'yes' : 'no'}`);
+    console.log(`  User approved: ${progress[stageKey('B')].userApproved ? 'yes' : 'no'}`);
   }
 
   if (progress.stage === 'C' || progress.stage === 'complete') {
-    console.log('│');
-    console.log('│  Stage C Progress:');
-    console.log(`│    Scaffold applied: ${progress[stageKey('C')].scaffoldApplied ? '✓' : '✗'}`);
-    console.log(`│    Configs generated: ${progress[stageKey('C')].configsGenerated ? '✓' : '✗'}`);
-    console.log(`│    Manifest updated: ${progress[stageKey('C')].manifestUpdated ? '✓' : '✗'}`);
-    console.log(`│    Wrappers synced: ${progress[stageKey('C')].wrappersSynced ? '✓' : '✗'}`);
-    console.log(`│    Skill retention reviewed: ${progress[stageKey('C')].skillRetentionReviewed ? '✓' : '✗'}`);
+    console.log('');
+    console.log('Stage C:');
+    console.log(`  Scaffold applied: ${progress[stageKey('C')].scaffoldApplied ? 'yes' : 'no'}`);
+    console.log(`  Configs generated: ${progress[stageKey('C')].configsGenerated ? 'yes' : 'no'}`);
+    console.log(`  Manifest updated: ${progress[stageKey('C')].manifestUpdated ? 'yes' : 'no'}`);
+    console.log(`  Wrappers synced: ${progress[stageKey('C')].wrappersSynced ? 'yes' : 'no'}`);
+    console.log(`  Skill retention reviewed: ${progress[stageKey('C')].skillRetentionReviewed ? 'yes' : 'no'}`);
   }
 
-  console.log('│');
-  console.log('│  Next steps:');
+  console.log('');
+  console.log('Next steps:');
   if (progress.stage === 'A') {
     if (!progress[stageKey('A')].validated) {
-      console.log('│    1. Complete the interview and draft the docs');
-      console.log(`│    2. Run: check-docs --docs-root ${docsRel}`);
+      console.log('- Complete the interview and draft Stage A docs.');
+      console.log(`- Run: node init/_tools/init.mjs check-docs --docs-root ${docsRel} --repo-root .`);
     } else if (!progress[stageKey('A')].userApproved) {
-      console.log('│    Ask the user to review Stage A docs');
-      console.log('│    After approval run: approve --stage A');
+      console.log('- Ask the user to review Stage A docs.');
+      console.log('- After approval run: node init/_tools/init.mjs approve --stage A --repo-root .');
     }
   } else if (progress.stage === 'B') {
     if (!progress[stageKey('B')].validated) {
-      console.log(`│    1. Create ${bpRel}`);
-      console.log(`│    2. Run: validate --blueprint ${bpRel}`);
+      console.log(`- Create ${bpRel}`);
+      console.log(`- Run: node init/_tools/init.mjs validate --blueprint ${bpRel} --repo-root .`);
     } else if (!progress[stageKey('B')].userApproved) {
-      console.log('│    Ask the user to review the blueprint');
-      console.log('│    After approval run: approve --stage B');
+      console.log('- Ask the user to review the blueprint.');
+      console.log('- After approval run: node init/_tools/init.mjs approve --stage B --repo-root .');
     }
   } else if (progress.stage === 'C') {
     if (!progress[stageKey('C')].wrappersSynced) {
-      console.log(`│    Run: apply --blueprint ${bpRel}`);
+      console.log(`- Run: node init/_tools/init.mjs apply --blueprint ${bpRel} --repo-root .`);
     } else if (!progress[stageKey('C')].skillRetentionReviewed) {
-      console.log('│    Review skill retention (keep vs prune)');
-      console.log('│    Then run: review-skill-retention');
+      console.log('- Review skill retention (keep vs prune).');
+      console.log('- Then run: node init/_tools/init.mjs review-skill-retention --repo-root .');
     } else if (!progress[stageKey('C')].userApproved) {
-      console.log('│    Initialization ready for review');
-      console.log('│    After approval run: approve --stage C');
+      console.log('- Initialization ready for review.');
+      console.log('- After approval run: node init/_tools/init.mjs approve --stage C --repo-root .');
     }
   } else if (progress.stage === 'complete') {
-    console.log('│    Initialization complete!');
+    console.log('- Initialization complete!');
   }
 
-  console.log('└─────────────────────────────────────────────────────────┘');
   console.log('');
 }
 
@@ -578,27 +612,20 @@ function warnLegacyWorkdirIfNeeded(repoRoot, docsRoot, blueprintPath, statePath)
   console.error(`[warn] Recommended: migrate outputs into \`init/_work/\`:\n       ${cmd}`);
 }
 
-function normalizeLang(lang) {
-  const v = String(lang || '').trim().toLowerCase();
-  if (v === 'zh') return 'zh';
-  return 'en';
-}
+// ============================================================================
+// START-HERE.md (Intake Doc)
+// ============================================================================
 
-function parseStartHeereLanguage(content) {
-  const m = String(content || '').match(/^\s*language:\s*(zh|en)\b/im);
-  return m ? normalizeLang(m[1]) : 'en';
-}
-
-const START_HERE_BLOCK_TYPES = ['LLM', 'MANUAL'];
-const START_HERE_BLOCK_TYPE_PRIMARY = 'LLM';
+const START_HERE_BLOCK_TYPES = ["LLM", "MANUAL"];
+const START_HERE_BLOCK_TYPE_PRIMARY = "LLM";
 
 function startHeereMarker(type, id, which) {
-  return `<!-- ${which} ${type}:${id} -->`;
+  return "<!-- " + which + " " + type + ":" + id + " -->";
 }
 
 function extractStartHeereBlockInner(content, type, id) {
-  const begin = startHeereMarker(type, id, 'BEGIN');
-  const end = startHeereMarker(type, id, 'END');
+  const begin = startHeereMarker(type, id, "BEGIN");
+  const end = startHeereMarker(type, id, "END");
 
   const beginIdx = content.indexOf(begin);
   if (beginIdx === -1) return null;
@@ -617,543 +644,119 @@ function extractStartHeereBlockInnerAnyType(content, id) {
 }
 
 function normalizeBlockInner(inner) {
-  if (inner == null) return '\n';
+  if (inner == null) return "\n";
   let s = String(inner);
-  if (!s.startsWith('\n')) s = '\n' + s;
-  if (!s.endsWith('\n')) s = s + '\n';
+  if (!s.startsWith("\n")) s = "\n" + s;
+  if (!s.endsWith("\n")) s = s + "\n";
   return s;
 }
 
 function renderStartHeereBlock(type, id, inner) {
-  const begin = startHeereMarker(type, id, 'BEGIN');
-  const end = startHeereMarker(type, id, 'END');
-  return `${begin}${normalizeBlockInner(inner)}${end}`;
+  const begin = startHeereMarker(type, id, "BEGIN");
+  const end = startHeereMarker(type, id, "END");
+  return begin + normalizeBlockInner(inner) + end;
 }
 
-function escapeMarkdownTableCell(value) {
-  const s = String(value ?? '');
-  return s.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
-}
-
-function stringifyForTable(value) {
-  if (value == null) return '';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function tryReadJson(filePath) {
-  try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    return { ok: true, value: JSON.parse(raw) };
-  } catch (e) {
-    return { ok: false, error: e };
-  }
-}
-
-function getAtPath(obj, dottedPath) {
-  if (!obj) return undefined;
-  const parts = String(dottedPath || '').split('.').filter(Boolean);
-  let cur = obj;
-  for (const p of parts) {
-    if (cur == null || typeof cur !== 'object') return undefined;
-    cur = cur[p];
-  }
-  return cur;
-}
-
-function getStartHeereManualDefaults(lang) {
-  const l = normalizeLang(lang);
-  if (l === 'zh') {
-    return {
-      SNAPSHOT:
-        '\n' +
-        '- project:\n' +
-        '- oneLine:\n' +
-        '- currentFocus:\n' +
-        '- keyDecisions:\n' +
-        '- openQuestions:\n',
-      WORKING_AGREEMENT:
-        '\n' +
-        '- timeZone:\n' +
-        '- asyncFirst: true\n' +
-        '- responseSLA:\n' +
-        '- meetingCadence:\n' +
-        '- decisionPolicy:\n' +
-        '  - preStageA: 可改\n' +
-        '  - stageA: 可改（注意校验器需要固定标题）\n' +
-        '  - stageB: 可改（重新运行 validate）\n' +
-        '  - stageC: 可改（重新运行 apply）\n',
-      MATERIALS_REGISTER:
-        '\n' +
-        '| ID | 类型 | 链接 | 负责人 | 提炼摘要 | 写入产物 | 状态 | 备注 |\n' +
-        '|---|---|---|---|---|---|---|---|\n' +
-        '| M-001 | doc | https:// |  |  |  | todo |  |\n',
-      PRE_STAGE_A_NOTES: '\n- \n'
-    };
-  }
-
-  return {
-    SNAPSHOT:
-      '\n' +
-      '- project:\n' +
-      '- oneLine:\n' +
-      '- currentFocus:\n' +
-      '- keyDecisions:\n' +
-      '- openQuestions:\n',
-    WORKING_AGREEMENT:
-      '\n' +
-      '- timeZone:\n' +
-      '- asyncFirst: true\n' +
-      '- responseSLA:\n' +
-      '- meetingCadence:\n' +
-      '- decisionPolicy:\n' +
-      '  - preStageA: editable\n' +
-      '  - stageA: editable (keep required headings for validator)\n' +
-      '  - stageB: editable (re-run validate)\n' +
-      '  - stageC: editable (re-run apply)\n',
-    MATERIALS_REGISTER:
-      '\n' +
-      '| ID | Type | Link | Owner | Extracted summary | Written to | Status | Notes |\n' +
-      '|---|---|---|---|---|---|---|---|\n' +
-      '| M-001 | doc | https:// |  |  |  | todo |  |\n',
-    PRE_STAGE_A_NOTES: '\n- \n'
-  };
-}
-
-function isSameMeaningfulContent(a, b) {
-  return String(a || '').trim() === String(b || '').trim();
-}
-
-function getStartHeereI18n(lang) {
-  const l = normalizeLang(lang);
-  if (l === 'zh') {
-    return {
-      title: '从这里开始（访谈入口）',
-      metaNote: [
-        '访谈入口文档（由流水线自动维护结构；内容由 LLM 自动维护）。',
-        '',
-        '生成看板：',
-        '  init/INIT-BOARD.md',
-        '',
-        '刷新方式：',
-        '- 隐式：大多数流水线命令会自动刷新 init/INIT-BOARD.md',
-        '- 手动（兜底）：',
-        '  node init/_tools/init.mjs update-board --apply --repo-root .',
-        '',
-        '安全门禁：',
-        '- 阶段推进前必须用户明确同意；不要在用户未确认时运行 approve --stage <A|B|C>。',
-        '',
-        '编辑规则：',
-        '- 仅编辑 "BEGIN LLM" / "END LLM" 区块内的内容（LLM 负责）。',
-        '- 流水线会在阶段推进/命令执行时自动刷新本文件（保留 LLM 区块内容）。',
-        '- 进度/路由/蓝图摘要等自动信息在 init/INIT-BOARD.md'
-      ].join('\n'),
-      sections: {
-        snapshot: '0. 摘要（LLM）',
-        workingAgreement: '1. 工作约定（LLM）',
-        materials: '2. 资料登记（LLM，不入库）',
-        notes: '3. 记录与要点（LLM）',
-        next: '4. 下一步（只读）'
-      },
-      labels: {
-        currentStage: '当前阶段',
-        stageA: '阶段 A（需求）',
-        stageB: '阶段 B（蓝图）',
-        stageC: '阶段 C（脚手架 + 技能）',
-        complete: '完成',
-        nextSteps: '下一步',
-        noState: '未检测到 init 状态文件。先运行 start 初始化。',
-        noBlueprint: '未检测到蓝图文件。先运行 start 创建模板，再编辑并 validate。'
-      }
-    };
-  }
-
-  return {
-    title: 'START HERE (Intake)',
-    metaNote: [
-      'Intake doc (pipeline-maintained structure; content is LLM-maintained).',
-      '',
-      'Generated board:',
-      '  init/INIT-BOARD.md',
-      '',
-      'Refresh policy:',
-      '- Implicit: most pipeline commands auto-refresh init/INIT-BOARD.md',
-      '- Manual (fallback):',
-      '  node init/_tools/init.mjs update-board --apply --repo-root .',
-      '',
-      'Safety gate:',
-      '- Stage transitions require explicit user approval. Do not run approve --stage <A|B|C> without the user confirming.',
-      '',
-      'Editing rules:',
-      '- Only edit inside the "BEGIN LLM" / "END LLM" blocks (LLM-owned).',
-      '- The pipeline may refresh this file when stages advance / commands run (LLM blocks are preserved).',
-      '- The generated board (routing + progress + digest) lives in init/INIT-BOARD.md'
-    ].join('\n'),
-    sections: {
-      snapshot: '0. Snapshot (LLM)',
-      workingAgreement: '1. Working Agreement (LLM)',
-      materials: '2. Materials Register (LLM, no uploads)',
-      notes: '3. Notes (LLM)',
-      next: '4. Next (Read-only)'
-    },
-    labels: {
-      currentStage: 'Current stage',
-      stageA: 'Stage A (Requirements)',
-      stageB: 'Stage B (Blueprint)',
-      stageC: 'Stage C (Scaffold + Skills)',
-      complete: 'Complete',
-      nextSteps: 'Next steps',
-      noState: 'No init state detected. Run start first.',
-      noBlueprint: 'No blueprint detected. Run start to create templates, then edit + validate.'
-    }
-  };
-}
-
-function toRelPathForBoard(repoRoot, p) {
-  if (!p) return '';
-  return toPosixPath(path.relative(repoRoot, p));
-}
-
-function toRelDirForBoard(repoRoot, p) {
-  const rel = toRelPathForBoard(repoRoot, p);
-  if (!rel) return '';
-  return rel.endsWith('/') ? rel : rel + '/';
-}
-
-function renderStartHeereRoutingMap(lang, { repoRoot, statePath, docsRoot, blueprintPath }) {
-  const l = normalizeLang(lang);
-  const stateRel = statePath ? toRelPathForBoard(repoRoot, statePath) : toPosixPath(INIT_STATE_DEFAULT_REL);
-  const docsRel = docsRoot ? toRelDirForBoard(repoRoot, docsRoot) : toPosixPath(STAGE_A_DOCS_DEFAULT_REL) + '/';
-  const bpRel = blueprintPath ? toRelPathForBoard(repoRoot, blueprintPath) : toPosixPath(BLUEPRINT_DEFAULT_REL);
-  const rows = l === 'zh'
-    ? [
-        ['`init/START-HERE.md`', '入口（LLM 维护：工作约定/资料/要点）', '必填'],
-        ['`init/INIT-BOARD.md`', '自动看板（路由/进度/蓝图摘要）', '自动生成'],
-        ['`init/README.md`', '人类可读说明（命令参考）', '参考'],
-        ['`init/AGENTS.md`', 'LLM 指令（给 AI 助手使用）', '参考'],
-        ['`init/_tools/`', '工具区（脚本/模板/清单）', '参考'],
-        ['`init/_work/`', '工作区（状态/阶段文档/蓝图）', '运行时生成'],
-        ['`init/_tools/stages/`', '阶段清单（可选参考）', '可选'],
-        [`\`${stateRel}\``, '初始化状态（驱动看板）', '运行时生成'],
-        [`\`${docsRel}\``, '阶段 A 文档（SSOT）', '必填'],
-        [`\`${bpRel}\``, '阶段 B 蓝图（机器可读 SSOT）', '必填'],
-        ['`.ai/skills/_meta/sync-manifest.json`', '启用的技能包（SSOT）', '阶段 C 生成'],
-        ['`.ai/skills/`', '技能 SSOT（只在这里编辑）', '阶段 C 相关'],
-        ['`.codex/skills/` / `.claude/skills/`', '生成的技能封装（不要手改）', '阶段 C 生成']
-      ]
-    : [
-        ['`init/START-HERE.md`', 'Intake doc (LLM-maintained: agreement + materials)', 'Required'],
-        ['`init/INIT-BOARD.md`', 'Generated board (routing + kanban + digest)', 'Auto-generated'],
-        ['`init/README.md`', 'Human guide (command reference)', 'Reference'],
-        ['`init/AGENTS.md`', 'LLM instructions (for AI assistants)', 'Reference'],
-        ['`init/_tools/`', 'Tooling (pipeline + templates + checklists)', 'Reference'],
-        ['`init/_work/`', 'Workspace (state + Stage A docs + blueprint)', 'Runtime-generated'],
-        ['`init/_tools/stages/`', 'Stage checklists (optional)', 'Optional'],
-        [`\`${stateRel}\``, 'Init state (drives the board)', 'Runtime-generated'],
-        [`\`${docsRel}\``, 'Stage A docs (SSOT)', 'Required'],
-        [`\`${bpRel}\``, 'Stage B blueprint (machine-readable SSOT)', 'Required'],
-        ['`.ai/skills/_meta/sync-manifest.json`', 'Enabled skill packs (SSOT)', 'Generated in Stage C'],
-        ['`.ai/skills/`', 'Skills SSOT (edit here only)', 'Stage C related'],
-        ['`.codex/skills/` / `.claude/skills/`', 'Generated wrappers (do not edit)', 'Generated in Stage C']
-      ];
-
-  const header = l === 'zh'
-    ? ['| 路径 | 作用 | 必填/来源 |', '|---|---|---|']
-    : ['| Path | Purpose | Required/Source |', '|---|---|---|'];
-
-  const lines = [...header, ...rows.map((r) => `| ${r[0]} | ${r[1]} | ${r[2]} |`)];
-  lines.push('');
-  lines.push(l === 'zh'
-    ? '常用命令：`start` → `check-docs` → `approve --stage A` → `validate` → `approve --stage B` → `apply` → `review-skill-retention` → `approve --stage C`'
-    : 'Common commands: `start` → `check-docs` → `approve --stage A` → `validate` → `approve --stage B` → `apply` → `review-skill-retention` → `approve --stage C`'
-  );
-  lines.push(l === 'zh'
-    ? '手动刷新看板：`update-board --apply`'
-    : 'Manual board refresh: `update-board --apply`'
-  );
-  return lines.join('\n') + '\n';
-}
-
-function renderStartHeereProgressBoard(lang, state, repoRoot, docsRoot, blueprintPath) {
-  const i18n = getStartHeereI18n(lang);
-  const l = normalizeLang(lang);
-  const docsRel = docsRoot ? toRelDirForBoard(repoRoot, docsRoot) : toPosixPath(STAGE_A_DOCS_DEFAULT_REL) + '/';
-  const bpRel = blueprintPath ? toRelPathForBoard(repoRoot, blueprintPath) : toPosixPath(BLUEPRINT_DEFAULT_REL);
-
-  if (!state) {
-    return `${i18n.labels.noState}\n\n\`\`\`bash\nnode init/_tools/init.mjs start --repo-root .\nnode init/_tools/init.mjs update-board --apply --repo-root .\n\`\`\`\n`;
-  }
-
-  const progress = getStageProgress(state);
-  const stage = progress.stage;
-
-  const stageLabel =
-    stage === 'A' ? i18n.labels.stageA :
-    stage === 'B' ? i18n.labels.stageB :
-    stage === 'C' ? i18n.labels.stageC :
-    i18n.labels.complete;
-
-  const lines = [];
-  lines.push(`${i18n.labels.currentStage}: **${stage}** (${stageLabel})`);
-  lines.push('');
-
-  // Stage A
-  const a = progress[stageKey('A')];
-  const aMustAskDone = a.mustAskAnswered >= a.mustAskTotal && a.mustAskTotal > 0;
-  const aDocsDone = a.docsWritten >= a.docsTotal && a.docsTotal > 0;
-  lines.push(`### ${i18n.labels.stageA}`);
-  lines.push(`- [${aMustAskDone ? 'x' : ' '}] ${l === 'zh' ? 'MUST-ask 已回答' : 'MUST-ask answered'}: ${a.mustAskAnswered}/${a.mustAskTotal}`);
-  lines.push(`- [${aDocsDone ? 'x' : ' '}] ${l === 'zh' ? '文档齐备' : 'Docs written'}: ${a.docsWritten}/${a.docsTotal}`);
-  lines.push(`- [${a.validated ? 'x' : ' '}] ${l === 'zh' ? 'check-docs 通过' : 'check-docs validated'}`);
-  lines.push(`- [${a.userApproved ? 'x' : ' '}] ${l === 'zh' ? '用户确认' : 'User approved'}`);
-  lines.push('');
-
-  // Stage B
-  const b = progress[stageKey('B')];
-  lines.push(`### ${i18n.labels.stageB}`);
-  lines.push(`- [${b.drafted ? 'x' : ' '}] ${l === 'zh' ? '已起草（蓝图文件存在）' : 'Drafted (blueprint exists)'}`);
-  lines.push(`- [${b.validated ? 'x' : ' '}] ${l === 'zh' ? 'validate 通过' : 'validate passed'}`);
-  lines.push(`- [${b.packsReviewed ? 'x' : ' '}] ${l === 'zh' ? 'packs 已复核' : 'packs reviewed'}`);
-  lines.push(`- [${b.userApproved ? 'x' : ' '}] ${l === 'zh' ? '用户确认' : 'User approved'}`);
-  lines.push('');
-
-  // Stage C
-  const c = progress[stageKey('C')];
-  lines.push(`### ${i18n.labels.stageC}`);
-  lines.push(`- [${c.scaffoldApplied ? 'x' : ' '}] ${l === 'zh' ? 'scaffold 已应用' : 'scaffold applied'}`);
-  lines.push(`- [${c.configsGenerated ? 'x' : ' '}] ${l === 'zh' ? 'configs 已生成' : 'configs generated'}`);
-  lines.push(`- [${c.manifestUpdated ? 'x' : ' '}] ${l === 'zh' ? 'manifest 已更新' : 'manifest updated'}`);
-  lines.push(`- [${c.wrappersSynced ? 'x' : ' '}] ${l === 'zh' ? 'wrappers 已同步' : 'wrappers synced'}`);
-  lines.push(`- [${c.skillRetentionReviewed ? 'x' : ' '}] ${l === 'zh' ? '技能保留已确认' : 'skill retention reviewed'}`);
-  lines.push(`- [${c.userApproved ? 'x' : ' '}] ${l === 'zh' ? '用户确认（完成）' : 'User approved (complete)'}`);
-  lines.push('');
-
-  // Next steps
-  lines.push(`### ${i18n.labels.nextSteps}`);
-  if (stage === 'A') {
-    if (!a.validated) {
-      lines.push(l === 'zh'
-        ? `- 编辑 \`${docsRel}\` 下的 4 份文档（先用模板起草）`
-        : `- Edit the 4 Stage A docs under \`${docsRel}\` (start from templates)`
-      );
-      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs check-docs --repo-root .')}\``);
-    } else if (!a.userApproved) {
-      lines.push(l === 'zh'
-        ? '- 请用户审阅 Stage A 文档，确认后运行：'
-        : '- Ask the user to review Stage A docs, then run:'
-      );
-      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs approve --stage A --repo-root .')}\``);
-    }
-  } else if (stage === 'B') {
-    if (!b.validated) {
-      lines.push(l === 'zh'
-        ? `- 编辑 \`${bpRel}\`（从 Stage A 映射关键决策）`
-        : `- Edit \`${bpRel}\` (map key decisions from Stage A)`
-      );
-      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs validate --repo-root .')}\``);
-      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs suggest-packs --repo-root .')}\``);
-    } else if (!b.userApproved) {
-      lines.push(l === 'zh'
-        ? '- 请用户审阅蓝图，确认后运行：'
-        : '- Ask the user to review the blueprint, then run:'
-      );
-      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs approve --stage B --repo-root .')}\``);
-    }
-  } else if (stage === 'C') {
-    if (!c.wrappersSynced) {
-      lines.push(l === 'zh'
-        ? '- 运行 apply（会生成 scaffold + configs + manifest + wrappers）：'
-        : '- Run apply (scaffold + configs + manifest + wrappers):'
-      );
-      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs apply --providers both --require-stage-a --repo-root .')}\``);
-    } else if (!c.skillRetentionReviewed) {
-      lines.push(l === 'zh'
-        ? '- 复核需要保留/删除的技能，然后标记已复核：'
-        : '- Review which skills to keep/prune, then mark reviewed:'
-      );
-      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs review-skill-retention --repo-root .')}\``);
-    } else if (!c.userApproved) {
-      lines.push(l === 'zh'
-        ? '- 请用户确认初始化完成，确认后运行：'
-        : '- Ask the user to confirm initialization complete, then run:'
-      );
-      lines.push(`- \`${toPosixPath('node init/_tools/init.mjs approve --stage C --repo-root .')}\``);
-    }
-  } else if (stage === 'complete') {
-    lines.push(l === 'zh' ? '- 初始化已完成。' : '- Initialization complete.');
-  }
-
-  lines.push('');
-  lines.push(`- \`${toPosixPath('node init/_tools/init.mjs update-board --apply --repo-root .')}\``);
-
-  return lines.join('\n') + '\n';
-}
-
-function renderStartHeereBlueprintDigest(lang, blueprintRel, blueprint, blueprintError) {
-  const i18n = getStartHeereI18n(lang);
-  const l = normalizeLang(lang);
-
-  if (blueprintError) {
-    const msg = blueprintError && blueprintError.message ? blueprintError.message : String(blueprintError);
-    return (l === 'zh'
-      ? `蓝图读取失败：\`${blueprintRel}\`\n\n错误：\`${escapeMarkdownTableCell(msg)}\`\n`
-      : `Failed to read blueprint: \`${blueprintRel}\`\n\nError: \`${escapeMarkdownTableCell(msg)}\`\n`
-    );
-  }
-
-  if (!blueprint) {
-    return `${i18n.labels.noBlueprint}\n`;
-  }
-
-  const keyPaths = [
-    'project.name',
-    'project.description',
-    'project.domain',
-    'repo.layout',
-    'repo.language',
-    'repo.packageManager',
-    'capabilities.frontend.enabled',
-    'capabilities.frontend.framework',
-    'capabilities.backend.enabled',
-    'capabilities.backend.framework',
-    'capabilities.api.style',
-    'capabilities.api.auth',
-    'capabilities.database.enabled',
-    'capabilities.database.kind',
-    'skills.packs'
-  ];
-
-  const keyRows = [];
-  const keyPathSet = new Set(keyPaths);
-  for (const kp of keyPaths) {
-    const v = getAtPath(blueprint, kp);
-    if (v === undefined || v === '') continue;
-    let rendered = stringifyForTable(v);
-    if (Array.isArray(v)) rendered = v.join(', ');
-    keyRows.push([`\`${kp}\``, escapeMarkdownTableCell(rendered)]);
-  }
-
-  const lines = [];
-  lines.push(l === 'zh' ? '### 关键决策（流程强相关）' : '### Key decisions (flow-critical)');
-  lines.push('');
-  if (keyRows.length === 0) {
-    lines.push(l === 'zh' ? '(暂无关键字段)' : '(no key fields yet)');
+function getStartHereTemplateContent(language, stage) {
+  const templatePath = path.join(TEMPLATES_DIR, "START-HERE.template.md");
+  let template;
+  if (fs.existsSync(templatePath)) {
+    template = stripUtf8Bom(fs.readFileSync(templatePath, "utf8"));
   } else {
-    lines.push(l === 'zh' ? '| 字段 | 值 |' : '| Field | Value |');
-    lines.push('|---|---|');
-    for (const [k, v] of keyRows) {
-      lines.push(`| ${k} | ${v} |`);
-    }
+    template = [
+      "# START HERE (Intake)",
+      "",
+      "<!--",
+      "LLM:",
+      "- This is the single intake surface for progressive information capture.",
+      "- Only edit inside the BEGIN/END LLM blocks.",
+      "",
+      "Rules:",
+      "- The user does NOT need to answer every question at once.",
+      "- Do not show explicit mapping tables here; capture and organize inputs.",
+      "- When a stage starts, roll once: archive prior stage focus + this round into <details>, then clear.",
+      "-->",
+      "",
+      "language: {{language}}",
+      "stage: {{stage}}",
+      "",
+      "## 0. Snapshot (LLM)",
+      "<!-- BEGIN LLM:SNAPSHOT -->",
+      "### Current focus",
+      "- (clear and update as you progress)",
+      "",
+      "### Key inputs (rolling)",
+      "| Key | Value | Status (todo/confirmed/tbd) | Notes |",
+      "|---|---|---|---|",
+      "|  |  | todo |  |",
+      "",
+      "### Questions (rolling, simplified)",
+      "- [ ] (add questions; the user can answer later)",
+      "<!-- END LLM:SNAPSHOT -->",
+      "",
+      "## 1. Working Agreement (LLM)",
+      "<!-- BEGIN LLM:WORKING_AGREEMENT -->",
+      "- timeZone:",
+      "- asyncFirst: true",
+      "- responseSLA:",
+      "- decisionPolicy:",
+      "  - preStageA: editable",
+      "  - stageA: editable (keep required headings for validator)",
+      "  - stageB: editable (re-run validate)",
+      "  - stageC: editable (re-run apply)",
+      "<!-- END LLM:WORKING_AGREEMENT -->",
+      "",
+      "## 2. Materials Register (LLM, no uploads)",
+      "<!-- BEGIN LLM:MATERIALS_REGISTER -->",
+      "| ID | Type | Link | Owner | Extracted summary | Written to | Status | Notes |",
+      "|---|---|---|---|---|---|---|---|",
+      "| M-001 | doc | https:// |  |  |  | todo |  |",
+      "<!-- END LLM:MATERIALS_REGISTER -->",
+      "",
+      "## 3. Notes (LLM)",
+      "<!-- BEGIN LLM:PRE_STAGE_A_NOTES -->",
+      "### This round (new inputs)",
+      "- (append as the user shares info)",
+      "",
+      "### Archive (folded, append-only)",
+      "<details>",
+      "<summary>Stage A (archive)</summary>",
+      "",
+      "- TBD",
+      "",
+      "</details>",
+      "<!-- END LLM:PRE_STAGE_A_NOTES -->",
+      "",
+      "## 4. Next (Read-only)",
+      "- See `init/INIT-BOARD.md`",
+      ""
+    ].join("\n");
   }
-  lines.push('');
 
-  // Fallback (schema-like) fields: show everything else, folded.
-  const flat = flattenObject(blueprint);
-  const extraEntries = Object.entries(flat)
-    .filter(([k]) => !keyPathSet.has(k))
-    .sort(([a], [b]) => a.localeCompare(b));
-
-  lines.push('<details>');
-  lines.push(`<summary>${l === 'zh' ? '其余字段（折叠，类 schema 展示）' : 'Other fields (folded, schema-like view)'}</summary>`);
-  lines.push('');
-  if (extraEntries.length === 0) {
-    lines.push(l === 'zh' ? '(无额外字段)' : '(no extra fields)');
-  } else {
-    lines.push(l === 'zh' ? '| 路径 | 值 |' : '| Path | Value |');
-    lines.push('|---|---|');
-    for (const [k, v] of extraEntries) {
-      const vv = escapeMarkdownTableCell(stringifyForTable(v));
-      lines.push(`| \`${escapeMarkdownTableCell(k)}\` | ${vv} |`);
-    }
-  }
-  lines.push('');
-  lines.push('</details>');
-  lines.push('');
-  lines.push(l === 'zh'
-    ? `蓝图位置：\`${blueprintRel}\``
-    : `Blueprint path: \`${blueprintRel}\``
-  );
-  lines.push('');
-
-  return lines.join('\n') + '\n';
+  return template
+    .replace(/\{\{\s*language\s*\}\}/g, String(language || ""))
+    .replace(/\{\{\s*stage\s*\}\}/g, String(stage || ""));
 }
 
-function renderStartHeereInterviewOutline(lang, repoRoot, docsRoot, blueprintPath) {
-  const l = normalizeLang(lang);
-  const qbank = toPosixPath('init/_tools/skills/initialize-project-from-requirements/templates/conversation-prompts.md');
-  const intake = '`init/START-HERE.md`';
-  const docsRel = docsRoot ? toRelDirForBoard(repoRoot, docsRoot) : toPosixPath(STAGE_A_DOCS_DEFAULT_REL) + '/';
-  const bpRel = blueprintPath ? toRelPathForBoard(repoRoot, blueprintPath) : toPosixPath(BLUEPRINT_DEFAULT_REL);
+function upsertStartHeereBlock(content, id, inner) {
+  const type = START_HERE_BLOCK_TYPE_PRIMARY;
+  const begin = startHeereMarker(type, id, "BEGIN");
+  const end = startHeereMarker(type, id, "END");
 
-  const lines = [];
-  if (l === 'zh') {
-    lines.push(`- 阶段 A 前：在 ${intake} 记录工作约定/资料登记/要点（LLM 维护），确认后进入阶段 A`);
-    lines.push(`- 阶段 A：用问题库 \`${qbank}\` 做访谈，把答案写入 \`${docsRel}\`，然后运行 \`check-docs\``);
-    lines.push(`- 阶段 B：把阶段 A 决策映射到 \`${bpRel}\`，运行 \`validate\`，必要时 \`suggest-packs\``);
-    lines.push('- 阶段 C：运行 `apply` 生成 scaffold + wrappers，复核技能保留并 `review-skill-retention`，最后 `approve --stage C`');
-  } else {
-    lines.push(`- Pre-Stage A: record Working Agreement / Materials / Notes in ${intake} (LLM-maintained), then confirm to enter Stage A`);
-    lines.push(`- Stage A: use the question bank \`${qbank}\`, write answers into \`${docsRel}\`, then run \`check-docs\``);
-    lines.push(`- Stage B: map Stage A decisions into \`${bpRel}\`, run \`validate\`, optionally \`suggest-packs\``);
-    lines.push('- Stage C: run `apply` to generate scaffold + wrappers, review retention via `review-skill-retention`, then `approve --stage C`');
+  const text = String(content || "");
+  const beginIdx = text.indexOf(begin);
+  const rendered = renderStartHeereBlock(type, id, inner);
+  if (beginIdx === -1) {
+    const nl = text.includes("\r\n") ? "\r\n" : "\n";
+    const trimmed = text.trimEnd();
+    return trimmed ? trimmed + nl + nl + rendered + nl : rendered + nl;
   }
-  return lines.join('\n') + '\n';
-}
 
-function generateStartHeereDoc({ lang, stage, manualBlocks }) {
-  const l = normalizeLang(lang);
-  const i18n = getStartHeereI18n(l);
-  const now = new Date().toISOString();
+  const afterBegin = beginIdx + begin.length;
+  const endIdx = text.indexOf(end, afterBegin);
+  if (endIdx === -1) return text;
 
-  const stageValue = String(stage || '').trim() || 'pre';
-
-  const header = [
-    `language: ${l} # zh | en`,
-    `stage: ${stageValue} # auto`,
-    `lastUpdated: ${now} # auto`,
-    '',
-    '<!--',
-    ...i18n.metaNote.split('\n').map((line) => line.trimEnd()),
-    '-->',
-    '',
-    `# ${i18n.title}`,
-    ''
-  ];
-
-  const parts = [];
-  parts.push(header.join('\n'));
-
-  parts.push(`## ${i18n.sections.snapshot}`);
-  parts.push(renderStartHeereBlock(START_HERE_BLOCK_TYPE_PRIMARY, 'SNAPSHOT', manualBlocks.SNAPSHOT));
-  parts.push('');
-
-  parts.push(`## ${i18n.sections.workingAgreement}`);
-  parts.push(renderStartHeereBlock(START_HERE_BLOCK_TYPE_PRIMARY, 'WORKING_AGREEMENT', manualBlocks.WORKING_AGREEMENT));
-  parts.push('');
-
-  parts.push(`## ${i18n.sections.materials}`);
-  parts.push(renderStartHeereBlock(START_HERE_BLOCK_TYPE_PRIMARY, 'MATERIALS_REGISTER', manualBlocks.MATERIALS_REGISTER));
-  parts.push('');
-
-  parts.push(`## ${i18n.sections.notes}`);
-  parts.push(renderStartHeereBlock(START_HERE_BLOCK_TYPE_PRIMARY, 'PRE_STAGE_A_NOTES', manualBlocks.PRE_STAGE_A_NOTES));
-  parts.push('');
-
-  parts.push(`## ${i18n.sections.next}`);
-  parts.push(l === 'zh'
-    ? '- 生成看板：`init/INIT-BOARD.md`'
-    : '- Generated board: `init/INIT-BOARD.md`'
-  );
-
-  let content = parts.join('\n');
-  content = content.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
-
-  return content;
+  return text.slice(0, beginIdx) + rendered + text.slice(endIdx + end.length);
 }
 
 function updateStartHeereDoc({ repoRoot, docsRoot, blueprintPath, intakePath, sourcePath, apply }) {
@@ -1163,214 +766,210 @@ function updateStartHeereDoc({ repoRoot, docsRoot, blueprintPath, intakePath, so
     fs.existsSync(targetPath)
       ? targetPath
       : (sourcePath && fs.existsSync(sourcePath) ? sourcePath : null);
-  const existing = existingPath ? fs.readFileSync(existingPath, 'utf8') : null;
-  const lang = existing ? parseStartHeereLanguage(existing) : 'en';
-  const stage = (loadState(repoRoot) || {}).stage || 'pre';
+  const existing = existingPath ? fs.readFileSync(existingPath, "utf8") : null;
 
-  const manualBlockIds = ['SNAPSHOT', 'WORKING_AGREEMENT', 'MATERIALS_REGISTER', 'PRE_STAGE_A_NOTES'];
+  const state = loadState(repoRoot);
+  const languageValue = getStateLanguage(state);
+  if (!languageValue) {
+    return { ok: true, op: "write", path: targetPath, mode: "skipped", reason: "language not set" };
+  }
 
-  const defaultsEn = getStartHeereManualDefaults('en');
-  const defaultsZh = getStartHeereManualDefaults('zh');
-  const defaults = getStartHeereManualDefaults(lang);
+  const stage = (state && state.stage) ? String(state.stage) : "A";
+  const template = getStartHereTemplateContent(languageValue, stage);
 
-  const manualBlocks = {};
-  for (const id of manualBlockIds) {
+  const blockIds = ["SNAPSHOT", "WORKING_AGREEMENT", "MATERIALS_REGISTER", "PRE_STAGE_A_NOTES"];
+
+  const defaults = {};
+  for (const id of blockIds) {
+    defaults[id] = extractStartHeereBlockInnerAnyType(template, id) || "\n";
+  }
+
+  const blocks = {};
+  for (const id of blockIds) {
     const extracted = existing ? extractStartHeereBlockInnerAnyType(existing, id) : null;
-    if (!extracted) {
-      manualBlocks[id] = defaults[id];
-      continue;
-    }
-
-    // If the user only has the template placeholder and they switched languages, swap the placeholder too.
-    const swapToDefaults =
-      (lang === 'zh' && isSameMeaningfulContent(extracted, defaultsEn[id])) ||
-      (lang === 'en' && isSameMeaningfulContent(extracted, defaultsZh[id]));
-
-    manualBlocks[id] = swapToDefaults ? defaults[id] : extracted;
+    blocks[id] = extracted != null ? extracted : defaults[id];
   }
 
-  const content = generateStartHeereDoc({ lang, stage, manualBlocks });
-
-  if (!apply) {
-    return { ok: true, op: 'write', path: targetPath, mode: 'dry-run' };
+  let content = template;
+  for (const id of blockIds) {
+    content = upsertStartHeereBlock(content, id, blocks[id]);
   }
+
+  const targetExisting = fs.existsSync(targetPath) ? fs.readFileSync(targetPath, "utf8") : null;
+  const nl = targetExisting && targetExisting.includes("\r\n") ? "\r\n" : "\n";
+  const hasBom = !!(targetExisting && targetExisting.charCodeAt(0) === 0xfeff);
+
+  let next = String(content).replace(/\r\n/g, "\n").split("\n").join(nl);
+  next = ensureTrailingNewline(next, nl);
+  if (hasBom && next.charCodeAt(0) !== 0xfeff) next = "\ufeff" + next;
+
+  const existingNormalized = targetExisting ? ensureTrailingNewline(targetExisting, nl) : null;
+  if (existingNormalized && next === existingNormalized) {
+    return { ok: true, op: "write", path: targetPath, mode: "skipped", reason: "no change" };
+  }
+
+  if (!apply) return { ok: true, op: "write", path: targetPath, mode: "dry-run" };
 
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.writeFileSync(targetPath, content, 'utf8');
-  return { ok: true, op: 'write', path: targetPath, mode: 'applied' };
+  fs.writeFileSync(targetPath, next, "utf8");
+  return { ok: true, op: "write", path: targetPath, mode: "applied" };
+}
+const INIT_BOARD_MACHINE_SNAPSHOT_START = '<!-- INIT-BOARD:MACHINE_SNAPSHOT:START -->';
+const INIT_BOARD_MACHINE_SNAPSHOT_END = '<!-- INIT-BOARD:MACHINE_SNAPSHOT:END -->';
+
+function getStateUpdatedAt(state) {
+  if (!state || typeof state !== 'object') return null;
+  const history = Array.isArray(state.history) ? state.history : [];
+  let latest = null;
+  for (const item of history) {
+    const ts = item && typeof item.timestamp === 'string' ? item.timestamp : null;
+    if (!ts) continue;
+    if (!latest || ts > latest) latest = ts;
+  }
+  if (latest) return latest;
+  return typeof state.createdAt === 'string' ? state.createdAt : null;
 }
 
-function getInitBoardI18n(lang) {
-  const l = normalizeLang(lang);
-  if (l === 'zh') {
-    return {
-      title: '初始化看板',
-      metaNote: [
-        '自动生成文件，请勿手改。',
-        '',
-        '说明：',
-        '- 入口：init/START-HERE.md（LLM 维护）',
-        '- 刷新：大多数流水线命令会隐式刷新本文件',
-        '- 手动（兜底）：',
-        '  node init/_tools/init.mjs update-board --apply --repo-root .',
-        '',
-        '安全门禁：',
-        '- 阶段推进前必须用户明确同意；不要在用户未确认时运行 approve --stage <A|B|C>。'
-      ].join('\n'),
-      sections: {
-        routing: '路由地图（自动）',
-        board: '进度看板（自动）',
-        blueprint: '蓝图摘要（自动）',
-        outline: '访谈大纲（自动）'
-      }
-    };
+function getInitBoardTemplateContent({ language }) {
+  const templatePath = path.join(TEMPLATES_DIR, 'INIT-BOARD.template.md');
+  if (fs.existsSync(templatePath)) {
+    return fs.readFileSync(templatePath, 'utf8').replace(/\{\{\s*language\s*\}\}/g, language || '');
   }
 
-  return {
-    title: 'INIT BOARD',
-    metaNote: [
-      'AUTO-GENERATED FILE. DO NOT EDIT.',
-      '',
-      'Notes:',
-      '- Intake doc: init/START-HERE.md (LLM-maintained)',
-      '- Refresh: most pipeline commands implicitly refresh this file',
-      '- Manual (fallback):',
-      '  node init/_tools/init.mjs update-board --apply --repo-root .',
-      '',
-      'Safety gate:',
-      '- Stage transitions require explicit user approval. Do not run approve --stage <A|B|C> without the user confirming.'
-    ].join('\n'),
-    sections: {
-      routing: 'Routing Map (AUTO)',
-      board: 'Progress Board (AUTO)',
-      blueprint: 'Blueprint Digest (AUTO)',
-      outline: 'Interview Outline (AUTO)'
-    }
-  };
-}
-
-function renderLegacyWorkdirNotice(lang, { repoRoot, docsRoot, blueprintPath, statePath }) {
-  const l = normalizeLang(lang);
-  const diag = detectWorkdirMode(repoRoot, docsRoot, blueprintPath, statePath);
-  if (diag.legacyUsed.length === 0) return '';
-
-  const paths = diag.legacyUsed.map((p) => `\`${p}\``).join('、');
-  const cmd = 'node init/_tools/init.mjs migrate-workdir --apply --repo-root .';
-
-  if (l === 'zh') {
-    return [
-      '> [!WARNING]',
-      `> 检测到你正在使用旧版 init 工作目录路径：${paths}。`,
-      '> 建议迁移到 `init/_work/`：',
-      `> \`${cmd}\``
-    ].join('\n');
-  }
-
+  // Fallback template (ASCII-only). The board is LLM-owned; the pipeline updates only the machine snapshot block.
   return [
-    '> [!WARNING]',
-    `> Legacy init workdir path(s) detected: ${diag.legacyUsed.map((p) => `\`${p}\``).join(', ')}.`,
-    '> Recommended migration into `init/_work/`:',
-    `> \`${cmd}\``
+    '# INIT BOARD (LLM-owned)',
+    '',
+    '<!--',
+    'LLM: Maintain this file in the user\'s chosen language and preferred layout.',
+    'Pipeline: Updates ONLY the MACHINE_SNAPSHOT block below.',
+    'Do not edit inside the MACHINE_SNAPSHOT markers.',
+    '-->',
+    '',
+    `language: ${language || ''}`,
+    '',
+    '## Current',
+    '- (LLM) Summarize current stage, current focus, and what is blocked.',
+    '',
+    '## Next',
+    '- (LLM) List the next 1-3 actions.',
+    '',
+    INIT_BOARD_MACHINE_SNAPSHOT_START,
+    '```json',
+    '{',
+    '  \"note\": \"machine snapshot will be injected here\"',
+    '}',
+    '```',
+    INIT_BOARD_MACHINE_SNAPSHOT_END,
+    ''
   ].join('\n');
 }
 
-function generateInitBoardDoc({ lang, repoRoot, statePath, docsRoot, state, blueprintPath, blueprint, blueprintError }) {
-  const l = normalizeLang(lang);
-  const i18n = getInitBoardI18n(l);
-  const now = new Date().toISOString();
-  const blueprintRel = toRelPathForBoard(repoRoot, blueprintPath);
+function ensureFileExistsWithContent(filePath, content, apply) {
+  if (fs.existsSync(filePath)) return { ok: true, op: 'skip', path: filePath, mode: 'skipped', reason: 'exists' };
+  if (!apply) return { ok: true, op: 'write', path: filePath, mode: 'dry-run' };
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content, 'utf8');
+  return { ok: true, op: 'write', path: filePath, mode: 'applied' };
+}
 
-  const header = [
-    `language: ${l} # zh | en`,
-    `lastUpdated: ${now} # auto`,
-    '',
-    '<!--',
-    ...i18n.metaNote.split('\n').map((line) => line.trimEnd()),
-    '-->',
-    '',
-    `# ${i18n.title}`,
-    ''
-  ];
+function ensureTrailingNewline(text, nl = '\n') {
+  const s = String(text || '');
+  if (s.endsWith('\r\n') || s.endsWith('\n')) return s;
+  return s + nl;
+}
 
-  const parts = [];
-  parts.push(header.join('\n'));
+function upsertTextBetweenMarkers(content, startMarker, endMarker, inner) {
+  const text = String(content || '');
+  const nl = text.includes('\r\n') ? '\r\n' : '\n';
 
-  parts.push(`## ${i18n.sections.routing}`);
-  const legacyNotice = renderLegacyWorkdirNotice(l, { repoRoot, docsRoot, blueprintPath, statePath });
-  if (legacyNotice) {
-    parts.push(legacyNotice.trimEnd());
-    parts.push('');
+  const normalizedInner = String(inner || '')
+    .replace(/\r\n/g, '\n')
+    .trimEnd()
+    .split('\n')
+    .join(nl);
+
+  const startIdx = text.indexOf(startMarker);
+  const endIdx = text.indexOf(endMarker);
+
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    const before = text.slice(0, startIdx + startMarker.length);
+    const after = text.slice(endIdx);
+    return `${before}${nl}${normalizedInner}${nl}${after}`;
   }
-  parts.push(renderStartHeereRoutingMap(l, { repoRoot, statePath, docsRoot, blueprintPath }).trimEnd());
-  parts.push('');
 
-  parts.push(`## ${i18n.sections.board}`);
-  parts.push(renderStartHeereProgressBoard(l, state, repoRoot, docsRoot, blueprintPath).trimEnd());
-  parts.push('');
-
-  parts.push(`## ${i18n.sections.blueprint}`);
-  parts.push(renderStartHeereBlueprintDigest(l, blueprintRel, blueprint, blueprintError).trimEnd());
-  parts.push('');
-
-  parts.push(`## ${i18n.sections.outline}`);
-  parts.push(renderStartHeereInterviewOutline(l, repoRoot, docsRoot, blueprintPath).trimEnd());
-
-  let content = parts.join('\n');
-  content = content.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
-  return content;
+  // Markers missing: append the block to preserve existing layout.
+  const trimmed = text.trimEnd();
+  if (!trimmed) {
+    return [startMarker, normalizedInner, endMarker, ''].join(nl);
+  }
+  return [trimmed, '', startMarker, normalizedInner, endMarker, ''].join(nl);
 }
 
 function updateInitBoardDoc({ repoRoot, docsRoot, blueprintPath, boardPath, apply }) {
   const targetPath = boardPath || path.join(repoRoot, INIT_BOARD_DEFAULT_REL);
 
-  // Language is sourced from the intake doc if possible.
-  let lang = 'en';
-  const startHerePath = path.join(repoRoot, START_HERE_DEFAULT_REL);
-  const startHeereLegacyPath = path.join(repoRoot, START_HEERE_LEGACY_REL);
-  if (fs.existsSync(startHerePath)) {
-    lang = parseStartHeereLanguage(fs.readFileSync(startHerePath, 'utf8'));
-  } else if (fs.existsSync(startHeereLegacyPath)) {
-    lang = parseStartHeereLanguage(fs.readFileSync(startHeereLegacyPath, 'utf8'));
-  } else if (fs.existsSync(targetPath)) {
-    lang = parseStartHeereLanguage(fs.readFileSync(targetPath, 'utf8'));
-  }
-
   const statePath = getStatePath(repoRoot);
   const state = loadState(repoRoot);
-
-  let blueprint = null;
-  let blueprintError = null;
-  if (fs.existsSync(blueprintPath)) {
-    const read = tryReadJson(blueprintPath);
-    if (read.ok) blueprint = read.value;
-    else blueprintError = read.error;
+  const language = getStateLanguage(state);
+  if (!language) {
+    return { ok: true, op: 'write', path: targetPath, mode: 'skipped', reason: 'language not set' };
   }
 
-  const content = generateInitBoardDoc({
-    lang,
-    repoRoot,
-    statePath,
-    docsRoot,
-    state,
-    blueprintPath,
-    blueprint,
-    blueprintError
-  });
+  const ensure = ensureFileExistsWithContent(targetPath, getInitBoardTemplateContent({ language }), apply);
+  if (!ensure.ok) return ensure;
 
+  const progress = state ? getStageProgress(state) : null;
+  const snapshot = {
+    statePath: toPosixPath(path.relative(repoRoot, statePath)),
+    stateUpdatedAt: getStateUpdatedAt(state),
+    language,
+    stage: state ? state.stage : null,
+    progress,
+    paths: {
+      docsRoot: toPosixPath(path.relative(repoRoot, docsRoot)),
+      blueprintPath: toPosixPath(path.relative(repoRoot, blueprintPath)),
+      startHere: toPosixPath(START_HERE_DEFAULT_REL),
+      initBoard: toPosixPath(INIT_BOARD_DEFAULT_REL)
+    },
+    files: {
+      docsRootExists: fs.existsSync(docsRoot),
+      blueprintExists: fs.existsSync(blueprintPath)
+    }
+  };
+
+  const snapshotInner = ['```json', JSON.stringify(snapshot, null, 2), '```'].join('\n');
+
+  const existing = fs.existsSync(targetPath) ? fs.readFileSync(targetPath, 'utf8') : '';
+  const next = upsertTextBetweenMarkers(existing, INIT_BOARD_MACHINE_SNAPSHOT_START, INIT_BOARD_MACHINE_SNAPSHOT_END, snapshotInner);
+
+  const nl = existing.includes('\r\n') ? '\r\n' : '\n';
+  const nextNormalized = ensureTrailingNewline(next, nl);
+  const existingNormalized = ensureTrailingNewline(existing, nl);
+
+  if (nextNormalized === existingNormalized) {
+    return { ok: true, op: 'write', path: targetPath, mode: 'skipped', reason: 'no change' };
+  }
   if (!apply) return { ok: true, op: 'write', path: targetPath, mode: 'dry-run' };
 
-  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.writeFileSync(targetPath, content, 'utf8');
+  fs.writeFileSync(targetPath, nextNormalized, 'utf8');
   return { ok: true, op: 'write', path: targetPath, mode: 'applied' };
 }
 
-function tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath) {
+function tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath, options = {}) {
   try {
+    const apply = options.apply == null ? true : !!options.apply;
+    const silent = !!options.silent;
+
+    const state = loadState(repoRoot);
+    const language = getStateLanguage(state);
+    if (!language) return;
+
     // Keep the intake doc in a consistent shape (preserve LLM blocks; migrate legacy name if needed).
     const startHerePath = path.join(repoRoot, START_HERE_DEFAULT_REL);
     const startHeereLegacyPath = path.join(repoRoot, START_HEERE_LEGACY_REL);
 
-    if (!fs.existsSync(startHerePath) && fs.existsSync(startHeereLegacyPath)) {
+    if (apply && !fs.existsSync(startHerePath) && fs.existsSync(startHeereLegacyPath)) {
       try {
         fs.renameSync(startHeereLegacyPath, startHerePath);
       } catch (e) {
@@ -1380,16 +979,16 @@ function tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath) {
     }
 
     const sourcePath = !fs.existsSync(startHerePath) && fs.existsSync(startHeereLegacyPath) ? startHeereLegacyPath : null;
-    updateStartHeereDoc({ repoRoot, docsRoot, blueprintPath, intakePath: startHerePath, sourcePath, apply: true });
+    updateStartHeereDoc({ repoRoot, docsRoot, blueprintPath, intakePath: startHerePath, sourcePath, apply });
 
     const res = updateInitBoardDoc({
       repoRoot,
       docsRoot,
       blueprintPath,
       boardPath: path.join(repoRoot, INIT_BOARD_DEFAULT_REL),
-      apply: true
+      apply
     });
-    if (res && res.mode === 'applied') {
+    if (!silent && res && res.mode === 'applied') {
       console.log(`[auto] INIT-BOARD updated: ${path.relative(repoRoot, res.path || '')}`);
     }
   } catch (e) {
@@ -2146,9 +1745,16 @@ function updateManifest(repoRoot, blueprint, apply) {
   const manifestPath = path.join(repoRoot, '.ai', 'skills', '_meta', 'sync-manifest.json');
   const prefixMap = packPrefixMap();
 
+  let prevCanonical = null;
   let manifest;
   if (fs.existsSync(manifestPath)) {
-    manifest = readJson(manifestPath);
+    try {
+      const raw = fs.readFileSync(manifestPath, 'utf8');
+      manifest = JSON.parse(stripUtf8Bom(raw));
+      prevCanonical = JSON.stringify(manifest, null, 2) + '\n';
+    } catch (e) {
+      die(`[error] Failed to read sync manifest JSON: ${toPosixPath(path.relative(repoRoot, manifestPath))}\n${e.message}`);
+    }
   } else {
     manifest = { version: 1, includePrefixes: [], includeSkills: [], excludePrefixes: [], excludeSkills: [] };
   }
@@ -2199,11 +1805,22 @@ function updateManifest(repoRoot, blueprint, apply) {
 
   if (!apply) return { op: 'write', path: manifestPath, mode: 'dry-run', warnings, includePrefixes: manifest.includePrefixes };
 
+  const nextCanonical = JSON.stringify(manifest, null, 2) + '\n';
+  if (prevCanonical != null && nextCanonical === prevCanonical) {
+    return { op: 'write', path: manifestPath, mode: 'skipped', reason: 'no change', warnings, includePrefixes: manifest.includePrefixes };
+  }
+
   writeJson(manifestPath, manifest);
   return { op: 'write', path: manifestPath, mode: 'applied', warnings, includePrefixes: manifest.includePrefixes };
 }
 
-function syncWrappers(repoRoot, providers, apply) {
+function tailText(text, maxChars = 4000) {
+  const s = String(text || '');
+  if (s.length <= maxChars) return s;
+  return `...(truncated ${s.length - maxChars} chars)\n` + s.slice(-maxChars);
+}
+
+function syncWrappers(repoRoot, providers, apply, options = {}) {
   const scriptPath = path.join(repoRoot, '.ai', 'scripts', 'sync-skills.mjs');
   if (!fs.existsSync(scriptPath)) {
     return { op: 'skip', path: scriptPath, reason: 'sync-skills.mjs not found' };
@@ -2214,9 +1831,17 @@ function syncWrappers(repoRoot, providers, apply) {
 
   if (!apply) return { op: 'run', cmd: `${cmd} ${args.join(' ')}`, mode: 'dry-run' };
 
-  const res = childProcess.spawnSync(cmd, args, { stdio: 'inherit', cwd: repoRoot });
+  const stdio = options.stdio === 'pipe' ? 'pipe' : 'inherit';
+  const res = childProcess.spawnSync(cmd, args, { stdio, cwd: repoRoot, encoding: stdio === 'pipe' ? 'utf8' : undefined });
   if (res.status !== 0) {
-    return { op: 'run', cmd: `${cmd} ${args.join(' ')}`, mode: 'failed', exitCode: res.status };
+    return {
+      op: 'run',
+      cmd: `${cmd} ${args.join(' ')}`,
+      mode: 'failed',
+      exitCode: res.status,
+      stdout: stdio === 'pipe' ? tailText(res.stdout) : undefined,
+      stderr: stdio === 'pipe' ? tailText(res.stderr) : undefined
+    };
   }
   return { op: 'run', cmd: `${cmd} ${args.join(' ')}`, mode: 'applied' };
 }
@@ -2374,6 +1999,30 @@ function main() {
     process.exit(0);
   }
 
+  // ========== set-language ==========
+  if (command === 'set-language') {
+    const raw = opts['language'] ?? opts['lang'] ?? opts['value'];
+    const language = normalizeLanguageValue(raw);
+    if (!language) {
+      die('[error] --language is required (non-empty).');
+    }
+
+    const state = loadState(repoRoot);
+    if (!state) {
+      die('[error] No init state detected. Run "start" first.');
+    }
+
+    if (getStateLanguage(state) !== language) {
+      state.language = language;
+      addHistoryEvent(state, 'language_set', `Language set: ${language}`);
+      saveState(repoRoot, state);
+    }
+
+    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
+    console.log(`[ok] Language set: ${language}`);
+    process.exit(0);
+  }
+
   // ========== status ==========
   if (command === 'status') {
     const state = loadState(repoRoot);
@@ -2384,9 +2033,12 @@ function main() {
     }
 
     if (format === 'json') {
+      // Keep stdout JSON-only (auto-update may create/refresh entry docs).
+      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath, { apply: true, silent: true });
       console.log(JSON.stringify(getStageProgress(state), null, 2));
     } else {
       printStatus(state, repoRoot, { docsRoot, blueprintPath });
+      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
     }
     process.exit(0);
   }
@@ -2429,7 +2081,7 @@ function main() {
     if (apply && failed.length === 0) {
       const nextDocsRoot = resolveDocsRoot(repoRoot, null);
       const nextBlueprintPath = resolveBlueprintPath(repoRoot, null);
-      tryAutoUpdateInitBoardDoc(repoRoot, nextDocsRoot, nextBlueprintPath);
+      tryAutoUpdateInitBoardDoc(repoRoot, nextDocsRoot, nextBlueprintPath, { apply: true, silent: format === 'json' });
     }
 
     process.exit(failed.length === 0 ? 0 : 1);
@@ -2438,6 +2090,14 @@ function main() {
   // ========== update-intake ==========
   if (command === 'update-intake') {
     const apply = !!opts['apply'];
+    const state = loadState(repoRoot);
+    if (!state) {
+      die('[error] No init state detected. Run "start" first.');
+    }
+    if (!getStateLanguage(state)) {
+      die('[error] Language not set. Run: node init/_tools/init.mjs set-language --language "<your language>" --repo-root .');
+    }
+
     const intakePath = resolvePath(repoRoot, opts['path'] || START_HERE_DEFAULT_REL);
     const startHerePath = path.join(repoRoot, START_HERE_DEFAULT_REL);
     const startHeereLegacyPath = path.join(repoRoot, START_HEERE_LEGACY_REL);
@@ -2456,7 +2116,7 @@ function main() {
     });
 
     if (apply && res.ok) {
-      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
+      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath, { apply: true, silent: format === 'json' });
     }
 
     if (format === 'json') {
@@ -2472,6 +2132,13 @@ function main() {
   if (command === 'update-board') {
     const apply = !!opts['apply'];
     const boardPath = resolvePath(repoRoot, opts['path'] || INIT_BOARD_DEFAULT_REL);
+    const state = loadState(repoRoot);
+    if (!state) {
+      die('[error] No init state detected. Run "start" first.');
+    }
+    if (!getStateLanguage(state)) {
+      die('[error] Language not set. Run: node init/_tools/init.mjs set-language --language "<your language>" --repo-root .');
+    }
 
     if (apply) {
       const startHerePath = path.join(repoRoot, START_HERE_DEFAULT_REL);
@@ -2512,6 +2179,8 @@ function main() {
       die('[error] No init state detected. Run "start" first.');
     }
 
+    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
+
     const progress = getStageProgress(state);
 
     if (progress.stage === 'A') {
@@ -2529,6 +2198,15 @@ function main() {
     if (progress.stage === 'B') {
       if (!progress[stageKey('B')].validated) {
         die('[error] Stage B blueprint not validated yet. Run validate first.');
+      }
+      if (!progress[stageKey('B')].packsReviewed) {
+        console.log('\n== Stage B Pack Review Checkpoint ==\n');
+        console.log('Stage B blueprint validated, but skill pack selection has not been reviewed yet.');
+        console.log('Review recommended packs (and optionally write safe-adds) by running:');
+        console.log('  node init/_tools/init.mjs suggest-packs --repo-root .');
+        console.log('\nAfter reviewing packs, you may approve Stage B:');
+        console.log('  node init/_tools/init.mjs approve --stage B');
+        process.exit(0);
       }
       console.log('\n== Stage B -> C Checkpoint ==\n');
       console.log('Stage B blueprint validated.');
@@ -2596,6 +2274,17 @@ function main() {
       if (!progress[stageKey('A')].validated) {
         die('[error] Stage A docs not validated yet. Run check-docs first.');
       }
+
+      // Re-check docs to avoid stale state if files changed after validation.
+      const docsCheck = checkDocs(docsRoot);
+      if (!docsCheck.ok) {
+        die(
+          [
+            '[error] Stage A docs are not currently valid. Fix docs and re-run check-docs.',
+            ...docsCheck.errors.map((e) => `- ${e}`)
+          ].join('\n')
+        );
+      }
       
       state[stageKey('A')].userApproved = true;
       state.stage = 'B';
@@ -2615,6 +2304,21 @@ function main() {
       }
       if (!progress[stageKey('B')].validated) {
         die('[error] Stage B blueprint not validated yet. Run validate first.');
+      }
+      if (!progress[stageKey('B')].packsReviewed) {
+        die('[error] Stage B skill packs have not been reviewed yet. Run suggest-packs first.');
+      }
+
+      // Re-check blueprint to avoid stale state if file changed after validation.
+      const blueprint = readBlueprintOrDie(repoRoot, blueprintPath);
+      const v = validateBlueprint(blueprint);
+      if (!v.ok) {
+        die(
+          [
+            '[error] Blueprint is not currently valid. Fix errors and re-run validate.',
+            ...v.errors.map((e) => `- ${e}`)
+          ].join('\n')
+        );
       }
       
       state[stageKey('B')].userApproved = true;
@@ -2653,10 +2357,10 @@ function main() {
       const agentDir = path.join(repoRoot, '.ai', 'skills', 'workflows', 'agent');
       if (fs.existsSync(agentDir)) {
         console.log('\n[info] Agent Builder pack detected');
-      console.log('- Found: .ai/skills/workflows/agent');
-      console.log('- If not needed, remove it to reduce repo size and sync time:');
-      console.log('  node init/_tools/init.mjs prune-agent-builder --repo-root . --apply --i-understand');
-    }
+        console.log('- Found: .ai/skills/workflows/agent');
+        console.log('- If not needed, remove it to reduce repo size and sync time:');
+        console.log('  node init/_tools/init.mjs prune-agent-builder --repo-root . --apply --i-understand');
+      }
       
       console.log('\n[IMPORTANT] Root docs have been updated from the blueprint:');
       console.log('- AGENTS.md: Project Type, Tech Stack, Key Directories');
@@ -2679,11 +2383,39 @@ function main() {
     if (v.ok) {
       const state = loadState(repoRoot);
       if (state && state.stage === 'B') {
-        state[stageKey('B')].drafted = true;
-        state[stageKey('B')].validated = true;
-        addHistoryEvent(state, 'stage_b_validated', 'Stage B blueprint validated');
-        saveState(repoRoot, state);
-        console.log('[auto] State updated: stage-b.validated = true');
+        const stageB =
+          state[stageKey('B')] && typeof state[stageKey('B')] === 'object' ? state[stageKey('B')] : {};
+        const prevDrafted = !!stageB.drafted;
+        const prevValidated = !!stageB.validated;
+
+        stageB.drafted = true;
+        stageB.validated = true;
+        state[stageKey('B')] = stageB;
+
+        if (!prevDrafted || !prevValidated) {
+          addHistoryEvent(state, 'stage_b_validated', 'Stage B blueprint validated');
+          saveState(repoRoot, state);
+          if (format !== 'json') {
+            console.log('[auto] State updated: stage-b.validated = true');
+          }
+        }
+      }
+    } else {
+      // If previously validated, mark as not validated to avoid stale state.
+      const state = loadState(repoRoot);
+      if (state && state.stage === 'B') {
+        const stageB =
+          state[stageKey('B')] && typeof state[stageKey('B')] === 'object' ? state[stageKey('B')] : {};
+        const prevValidated = !!stageB.validated;
+        if (prevValidated) {
+          stageB.validated = false;
+          state[stageKey('B')] = stageB;
+          addHistoryEvent(state, 'stage_b_invalidated', 'Stage B blueprint validation failed (state marked not validated)');
+          saveState(repoRoot, state);
+          if (format !== 'json') {
+            console.log('[auto] State updated: stage-b.validated = false');
+          }
+        }
       }
     }
 
@@ -2696,7 +2428,7 @@ function main() {
         ? `[ok] Blueprint is valid: ${path.relative(repoRoot, blueprintPath)}`
         : `[error] Blueprint validation failed: ${path.relative(repoRoot, blueprintPath)}`
     };
-    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
+    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath, { apply: true, silent: format === 'json' });
     printResult(result, format);
     process.exit(v.ok ? 0 : 1);
   }
@@ -2705,25 +2437,47 @@ function main() {
     const strict = !!opts['strict'];
     const res = checkDocs(docsRoot);
 
-    const ok = res.ok && (!strict || res.warnings.length === 0);
+    const passed = res.ok;
+    const ok = passed && (!strict || res.warnings.length === 0);
     const summary = ok
       ? `[ok] Stage A docs check passed: ${path.relative(repoRoot, docsRoot)}`
       : `[error] Stage A docs check failed: ${path.relative(repoRoot, docsRoot)}`;
 
     // Auto-update state if validation passes
-    if (ok) {
+    if (passed) {
       const state = loadState(repoRoot);
       if (state && state.stage === 'A') {
-        state[stageKey('A')].validated = true;
-        state[stageKey('A')].docsWritten = {
+        const stageA =
+          state[stageKey('A')] && typeof state[stageKey('A')] === 'object' ? state[stageKey('A')] : {};
+        const prevValidated = !!stageA.validated;
+        let changed = false;
+
+        if (!prevValidated) {
+          stageA.validated = true;
+          changed = true;
+        }
+
+        const nextDocsWritten = {
           requirements: fs.existsSync(path.join(docsRoot, 'requirements.md')),
           nfr: fs.existsSync(path.join(docsRoot, 'non-functional-requirements.md')),
           glossary: fs.existsSync(path.join(docsRoot, 'domain-glossary.md')),
           riskQuestions: fs.existsSync(path.join(docsRoot, 'risk-open-questions.md'))
         };
+        const prevDocsWritten =
+          stageA.docsWritten && typeof stageA.docsWritten === 'object' ? stageA.docsWritten : null;
+        const docsWrittenChanged =
+          !prevDocsWritten ||
+          !!prevDocsWritten.requirements !== nextDocsWritten.requirements ||
+          !!prevDocsWritten.nfr !== nextDocsWritten.nfr ||
+          !!prevDocsWritten.glossary !== nextDocsWritten.glossary ||
+          !!prevDocsWritten.riskQuestions !== nextDocsWritten.riskQuestions;
+        if (docsWrittenChanged) {
+          stageA.docsWritten = nextDocsWritten;
+          changed = true;
+        }
+
         // The pipeline is file-based; treat a validated Stage A as "must-ask answered".
         // This keeps the board/status verifiable without requiring manual state edits.
-        const stageA = state[stageKey('A')] || {};
         const mustAsk = stageA.mustAsk || {};
         const reqRel = toPosixPath(path.relative(repoRoot, path.join(docsRoot, 'requirements.md')));
         const nfrRel = toPosixPath(path.relative(repoRoot, path.join(docsRoot, 'non-functional-requirements.md')));
@@ -2736,24 +2490,52 @@ function main() {
           constraints: nfrRel,
           successMetrics: reqRel
         };
-        for (const key of Object.keys(mustAsk)) {
+        for (const key of Object.keys(writtenToByKey)) {
           const prev = mustAsk[key] && typeof mustAsk[key] === 'object' ? mustAsk[key] : {};
-          mustAsk[key] = {
+          const next = {
             ...prev,
             asked: true,
             answered: true,
             writtenTo: prev.writtenTo || writtenToByKey[key] || reqRel
           };
+          if (prev.asked !== true || prev.answered !== true || prev.writtenTo !== next.writtenTo) {
+            changed = true;
+          }
+          mustAsk[key] = next;
         }
         stageA.mustAsk = mustAsk;
         state[stageKey('A')] = stageA;
-        addHistoryEvent(state, 'stage_a_validated', 'Stage A docs validated');
-        saveState(repoRoot, state);
-        console.log('[auto] State updated: stage-a.validated = true');
+
+        if (changed) {
+          if (!prevValidated) {
+            addHistoryEvent(state, 'stage_a_validated', 'Stage A docs validated');
+          }
+          saveState(repoRoot, state);
+          if (format !== 'json') {
+            console.log('[auto] State updated: stage-a.validated = true');
+          }
+        }
+      }
+    } else {
+      // If previously validated, mark as not validated to avoid stale state.
+      const state = loadState(repoRoot);
+      if (state && state.stage === 'A') {
+        const stageA =
+          state[stageKey('A')] && typeof state[stageKey('A')] === 'object' ? state[stageKey('A')] : {};
+        const prevValidated = !!stageA.validated;
+        if (prevValidated) {
+          stageA.validated = false;
+          state[stageKey('A')] = stageA;
+          addHistoryEvent(state, 'stage_a_invalidated', 'Stage A docs validation failed (state marked not validated)');
+          saveState(repoRoot, state);
+          if (format !== 'json') {
+            console.log('[auto] State updated: stage-a.validated = false');
+          }
+        }
       }
     }
 
-    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
+    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath, { apply: true, silent: format === 'json' });
     printResult({ ok, errors: res.errors, warnings: res.warnings, summary }, format);
     process.exit(ok ? 0 : 1);
   }
@@ -2795,15 +2577,26 @@ function main() {
     if (v.ok) {
       const state = loadState(repoRoot);
       if (state && state.stage === 'B') {
-        state[stageKey('B')].drafted = true;
-        state[stageKey('B')].packsReviewed = true;
-        addHistoryEvent(state, 'stage_b_packs_reviewed', 'Stage B packs reviewed via suggest-packs');
-        saveState(repoRoot, state);
-        console.log('[auto] State updated: stage-b.packsReviewed = true');
+        const stageB =
+          state[stageKey('B')] && typeof state[stageKey('B')] === 'object' ? state[stageKey('B')] : {};
+        const prevDrafted = !!stageB.drafted;
+        const prevReviewed = !!stageB.packsReviewed;
+
+        stageB.drafted = true;
+        stageB.packsReviewed = true;
+        state[stageKey('B')] = stageB;
+
+        if (!prevDrafted || !prevReviewed) {
+          addHistoryEvent(state, 'stage_b_packs_reviewed', 'Stage B packs reviewed via suggest-packs');
+          saveState(repoRoot, state);
+          if (format !== 'json') {
+            console.log('[auto] State updated: stage-b.packsReviewed = true');
+          }
+        }
       }
     }
 
-    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
+    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath, { apply: true, silent: format === 'json' });
     printResult(result, format);
     process.exit(v.ok ? 0 : 1);
   }
@@ -2832,7 +2625,7 @@ function main() {
     }
 
     if (apply) {
-      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
+      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath, { apply: true, silent: format === 'json' });
     }
     process.exit(0);
   }
@@ -2859,6 +2652,17 @@ function main() {
     }
     if (!cleanup && (archiveAll || archiveDocs || archiveBlueprint)) {
       console.warn('[warn] Archive flags are ignored without --cleanup-init');
+    }
+
+    const stateForGate = loadState(repoRoot);
+    if (stateForGate && stateForGate.stage !== 'C') {
+      die(
+        [
+          `[error] Current stage is ${stateForGate.stage}. apply is only valid in Stage C.`,
+          '[hint] After user approval, run: node init/_tools/init.mjs approve --stage B',
+          '[hint] Or use: node init/_tools/init.mjs scaffold --apply  (minimal directories only)'
+        ].join('\n')
+      );
     }
 
     const blueprint = readBlueprintOrDie(repoRoot, blueprintPath);
@@ -2900,22 +2704,26 @@ function main() {
 
     // Scaffold directories
     const scaffoldPlan = planScaffold(repoRoot, blueprint, true);
-    console.log('[ok] Scaffold updated.');
-    for (const item of scaffoldPlan) {
-      const mode = item.mode ? ` (${item.mode})` : '';
-      const reason = item.reason ? ` [${item.reason}]` : '';
-      console.log(`  - ${item.op}: ${path.relative(repoRoot, item.path || '')}${mode}${reason}`);
+    if (format !== 'json') {
+      console.log('[ok] Scaffold updated.');
+      for (const item of scaffoldPlan) {
+        const mode = item.mode ? ` (${item.mode})` : '';
+        const reason = item.reason ? ` [${item.reason}]` : '';
+        console.log(`  - ${item.op}: ${path.relative(repoRoot, item.path || '')}${mode}${reason}`);
+      }
     }
 
     // Generate config files (default: enabled)
     let configResults = [];
     if (!skipConfigs) {
       configResults = generateConfigFiles(repoRoot, blueprint, true);
-      console.log('[ok] Config files generated.');
-      for (const r of configResults) {
-        const mode = r.mode ? ` (${r.mode})` : '';
-        const reason = r.reason ? ` [${r.reason}]` : '';
-        console.log(`  - ${r.action}: ${r.file}${mode}${reason}`);
+      if (format !== 'json') {
+        console.log('[ok] Config files generated.');
+        for (const r of configResults) {
+          const mode = r.mode ? ` (${r.mode})` : '';
+          const reason = r.reason ? ` [${r.reason}]` : '';
+          console.log(`  - ${r.action}: ${r.file}${mode}${reason}`);
+        }
       }
     }
 
@@ -2923,20 +2731,24 @@ function main() {
     let readmeResult = null;
     if (!skipReadme) {
       readmeResult = generateProjectReadme(repoRoot, blueprint, true);
-      if (readmeResult.op === 'write' && readmeResult.mode === 'applied') {
-        console.log('[ok] README.md generated from blueprint.');
-      } else if (readmeResult.reason) {
-        console.log(`[info] README.md: ${readmeResult.reason}`);
+      if (format !== 'json') {
+        if (readmeResult.op === 'write' && readmeResult.mode === 'applied') {
+          console.log('[ok] README.md generated from blueprint.');
+        } else if (readmeResult.reason) {
+          console.log(`[info] README.md: ${readmeResult.reason}`);
+        }
       }
     }
 
     let agentsResult = null;
     if (!skipRootAgents) {
       agentsResult = generateProjectAgents(repoRoot, blueprint, true);
-      if (agentsResult.op === 'write' && agentsResult.mode === 'applied') {
-        console.log('[ok] AGENTS.md updated from blueprint.');
-      } else if (agentsResult.reason) {
-        console.log(`[info] AGENTS.md: ${agentsResult.reason}`);
+      if (format !== 'json') {
+        if (agentsResult.op === 'write' && agentsResult.mode === 'applied') {
+          console.log('[ok] AGENTS.md updated from blueprint.');
+        } else if (agentsResult.reason) {
+          console.log(`[info] AGENTS.md: ${agentsResult.reason}`);
+        }
       }
     }
 
@@ -2954,24 +2766,72 @@ function main() {
     }
 
     // Sync wrappers
-    const syncResult = syncWrappers(repoRoot, providers, true);
+    const syncResult = syncWrappers(repoRoot, providers, true, { stdio: format === 'json' ? 'pipe' : 'inherit' });
     if (syncResult.mode === 'failed') die(`[error] sync-skills.mjs failed with exit code ${syncResult.exitCode}`);
 
     // Auto-update state
     const state = loadState(repoRoot);
-    if (state) {
-      state[stageKey('C')].scaffoldApplied = true;
-      state[stageKey('C')].configsGenerated = !skipConfigs;
-      state[stageKey('C')].manifestUpdated = true;
-      state[stageKey('C')].wrappersSynced = syncResult.mode === 'applied';
-      state[stageKey('C')].skillRetentionReviewed = false;
-      addHistoryEvent(state, 'stage_c_applied', 'Stage C apply completed');
-      saveState(repoRoot, state);
-      console.log('[auto] State updated: stage-c.* = true');
+    if (state && state.stage === 'C') {
+      const stageC =
+        state[stageKey('C')] && typeof state[stageKey('C')] === 'object' ? state[stageKey('C')] : {};
+
+      let changed = false;
+      const skillsChanged =
+        (manifestResult && manifestResult.mode === 'applied') ||
+        (pruneResult && pruneResult.mode === 'applied');
+
+      if (stageC.scaffoldApplied !== true) {
+        stageC.scaffoldApplied = true;
+        changed = true;
+      }
+
+      if (typeof stageC.configsGenerated !== 'boolean') {
+        stageC.configsGenerated = false;
+        changed = true;
+      }
+      if (!skipConfigs && stageC.configsGenerated !== true) {
+        stageC.configsGenerated = true;
+        changed = true;
+      }
+
+      if (stageC.manifestUpdated !== true) {
+        stageC.manifestUpdated = true;
+        changed = true;
+      }
+
+      if (typeof stageC.wrappersSynced !== 'boolean') {
+        stageC.wrappersSynced = false;
+        changed = true;
+      }
+      if (syncResult && syncResult.mode === 'applied' && stageC.wrappersSynced !== true) {
+        stageC.wrappersSynced = true;
+        changed = true;
+      }
+
+      if (typeof stageC.skillRetentionReviewed !== 'boolean') {
+        stageC.skillRetentionReviewed = false;
+        changed = true;
+      }
+      if (skillsChanged && stageC.skillRetentionReviewed === true) {
+        stageC.skillRetentionReviewed = false;
+        changed = true;
+      }
+
+      state[stageKey('C')] = stageC;
+      if (changed) {
+        const detail = skillsChanged
+          ? 'Stage C apply completed (skills changed; retention review required)'
+          : 'Stage C apply completed';
+        addHistoryEvent(state, 'stage_c_applied', detail);
+        saveState(repoRoot, state);
+        if (format !== 'json') {
+          console.log('[auto] State updated: stage-c progress updated');
+        }
+      }
     }
 
     if (!cleanup) {
-      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
+      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath, { apply: true, silent: format === 'json' });
     }
 
     // Optional cleanup
@@ -3020,7 +2880,7 @@ function main() {
       console.log(`- Docs root: ${path.relative(repoRoot, docsRoot)}`);
       if (!docsCheckRes.ok) console.log('[warn] Stage A docs check had errors; consider re-running with --require-stage-a.');
       if (docsCheckRes.warnings.length > 0) console.log('[warn] Stage A docs check has warnings; ensure TBD/TODO items are tracked.');
-      console.log(`- Manifest updated: ${path.relative(repoRoot, manifestResult.path)}`);
+      console.log(`- Manifest: ${manifestResult.mode || manifestResult.op} (${path.relative(repoRoot, manifestResult.path)})`);
       if (archiveResult) console.log(`- Archive: ${archiveResult.mode}`);
       if (pruneResult) console.log(`- Agent workflow prune: ${pruneResult.mode}`);
       console.log(`- Wrappers synced via: ${syncResult.cmd || '(skipped)'}`);
@@ -3105,15 +2965,22 @@ function main() {
       die('[error] Stage C not complete yet. Run apply first.');
     }
 
-    state[stageKey('C')].skillRetentionReviewed = true;
-    addHistoryEvent(state, 'stage_c_skill_retention_reviewed', 'Skill retention reviewed');
-    saveState(repoRoot, state);
-    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
+    const stageC =
+      state[stageKey('C')] && typeof state[stageKey('C')] === 'object' ? state[stageKey('C')] : {};
+    const prevReviewed = !!stageC.skillRetentionReviewed;
+    stageC.skillRetentionReviewed = true;
+    state[stageKey('C')] = stageC;
+
+    if (!prevReviewed) {
+      addHistoryEvent(state, 'stage_c_skill_retention_reviewed', 'Skill retention reviewed');
+      saveState(repoRoot, state);
+    }
+    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath, { apply: true, silent: format === 'json' });
 
     if (format === 'json') {
-      console.log(JSON.stringify({ ok: true, stage: 'C', skillRetentionReviewed: true }, null, 2));
+      console.log(JSON.stringify({ ok: true, stage: 'C', skillRetentionReviewed: true, alreadyReviewed: prevReviewed }, null, 2));
     } else {
-      console.log('[ok] Stage C skill retention review marked as complete.');
+      console.log(prevReviewed ? '[info] Skill retention already marked as reviewed.' : '[ok] Stage C skill retention review marked as complete.');
       console.log('Next:');
       console.log('  node init/_tools/init.mjs advance');
     }
@@ -3158,9 +3025,7 @@ function main() {
       }
     }
 
-    if (apply) {
-      tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath);
-    }
+    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath, { apply, silent: format === 'json' });
 
     process.exit(0);
   }
@@ -3188,8 +3053,10 @@ function main() {
     
     let syncResult = null;
     if (apply && syncAfter && pruneResult.mode === 'applied') {
-      console.log('[info] Re-syncing skill wrappers...');
-      syncResult = syncWrappers(repoRoot, providers, true);
+      if (format !== 'json') {
+        console.log('[info] Re-syncing skill wrappers...');
+      }
+      syncResult = syncWrappers(repoRoot, providers, true, { stdio: format === 'json' ? 'pipe' : 'inherit' });
     }
 
     if (format === 'json') {
@@ -3207,6 +3074,7 @@ function main() {
         }
       }
     }
+    tryAutoUpdateInitBoardDoc(repoRoot, docsRoot, blueprintPath, { apply, silent: format === 'json' });
     process.exit(0);
   }
 
